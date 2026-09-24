@@ -32,7 +32,6 @@ const TILE_SIZE = 32;
 const COLS = 20;
 const ROWS = 20;
 
-// Respaldamos el mapa original
 const BASE_MAP = [
     [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
     [1,2,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,2,1],
@@ -56,7 +55,6 @@ const BASE_MAP = [
     [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 ];
 
-// Matriz activa en uso
 let mapMatrix = JSON.parse(JSON.stringify(BASE_MAP));
 
 let gameState = 'START'; 
@@ -71,11 +69,9 @@ let currentTargets = { alpha: null, beta: null, gamma: null, delta: null };
 
 let mainMenuIndex = 0;
 const mainOptions = ['Jugar (Mapa Base)', 'Niveles Guardados', 'Ver Récords (Top 10)', 'Editor de Niveles'];
-
 let pauseMenuIndex = 0;
 const pauseOptions = ['Continuar', 'Reiniciar', 'Salir al Menú'];
 
-// Variables de datos remotos
 let playerName = '';
 let highScores = [];
 let scoreSubmitted = false;
@@ -90,14 +86,16 @@ let modeTimer = 0;
 const CHASE_DURATION = 60 * 15;  
 const SCATTER_DURATION = 60 * 5; 
 const FRIGHTENED_DURATION = 60 * 7; 
+let enemiesEatenThisPowerup = 0; 
+let floatingTexts = []; 
 
 let player = { x: 9 * TILE_SIZE, y: 3 * TILE_SIZE, speed: 2, currentDir: 'NONE', nextDir: 'NONE', color: '#00ffcc', size: TILE_SIZE - 8 };
-let portalCooldown = 0; // Evita bucles infinitos en portales
+let portalCooldown = 0; 
 
-let enemyAlpha = { x: 9 * TILE_SIZE, y: 6 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ff0044', active: true, releaseDots: 0 };
-let enemyBeta = { x: 9 * TILE_SIZE, y: 8 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ffb8ff', active: false, releaseDots: 20 };
-let enemyGamma = { x: 10 * TILE_SIZE, y: 8 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#00aaff', active: false, releaseDots: 50 };
-let enemyDelta = { x: 9 * TILE_SIZE, y: 9 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ffaa00', active: false, releaseDots: 90 };
+let enemyAlpha = { x: 9 * TILE_SIZE, y: 6 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ff0044', active: true, isDead: false, releaseDots: 0 };
+let enemyBeta = { x: 9 * TILE_SIZE, y: 8 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ffb8ff', active: false, isDead: false, releaseDots: 20 };
+let enemyGamma = { x: 10 * TILE_SIZE, y: 8 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#00aaff', active: false, isDead: false, releaseDots: 50 };
+let enemyDelta = { x: 9 * TILE_SIZE, y: 9 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ffaa00', active: false, isDead: false, releaseDots: 90 };
 const enemiesList = [enemyAlpha, enemyBeta, enemyGamma, enemyDelta];
 
 let score = 0;
@@ -126,11 +124,13 @@ function resetPositions() {
     player.currentDir = 'NONE'; player.nextDir = 'NONE'; player.size = TILE_SIZE - 8;
     dotsEatenThisLife = 0;
     portalCooldown = 0;
+    enemiesEatenThisPowerup = 0;
+    floatingTexts = [];
 
-    enemyAlpha.x = 9 * TILE_SIZE; enemyAlpha.y = 6 * TILE_SIZE; enemyAlpha.currentDir = 'UP'; enemyAlpha.active = true;
-    enemyBeta.active = false; enemyBeta.x = 9 * TILE_SIZE; enemyBeta.y = 8 * TILE_SIZE; enemyBeta.currentDir = 'UP';
-    enemyGamma.active = false; enemyGamma.x = 10 * TILE_SIZE; enemyGamma.y = 8 * TILE_SIZE; enemyGamma.currentDir = 'UP';
-    enemyDelta.active = false; enemyDelta.x = 9 * TILE_SIZE; enemyDelta.y = 9 * TILE_SIZE; enemyDelta.currentDir = 'UP';
+    enemyAlpha.x = 9 * TILE_SIZE; enemyAlpha.y = 6 * TILE_SIZE; enemyAlpha.currentDir = 'UP'; enemyAlpha.active = true; enemyAlpha.isDead = false;
+    enemyBeta.active = false; enemyBeta.x = 9 * TILE_SIZE; enemyBeta.y = 8 * TILE_SIZE; enemyBeta.currentDir = 'UP'; enemyBeta.isDead = false;
+    enemyGamma.active = false; enemyGamma.x = 10 * TILE_SIZE; enemyGamma.y = 8 * TILE_SIZE; enemyGamma.currentDir = 'UP'; enemyGamma.isDead = false;
+    enemyDelta.active = false; enemyDelta.x = 9 * TILE_SIZE; enemyDelta.y = 9 * TILE_SIZE; enemyDelta.currentDir = 'UP'; enemyDelta.isDead = false;
     
     enemyMode = 'CHASE';
     modeTimer = 0;
@@ -177,14 +177,11 @@ function fetchLevels() {
     .catch(() => { savedLevels = []; gameState = 'MENU_LEVELS'; });
 }
 
-canvas.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-});
+canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); });
 
 canvas.addEventListener('mousedown', (e) => {
     if (gameState === 'EDITOR') {
         if (e.button === 2) return; 
-
         const rect = canvas.getBoundingClientRect();
         const scaleX = canvas.width / rect.width;
         const scaleY = canvas.height / rect.height;
@@ -212,13 +209,13 @@ document.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowDown') mainMenuIndex = mainMenuIndex + 1 >= mainOptions.length ? 0 : mainMenuIndex + 1;
         if (e.key === 'Enter') {
             if (mainMenuIndex === 0) { 
-                mapMatrix = JSON.parse(JSON.stringify(BASE_MAP)); // Carga el original
+                mapMatrix = JSON.parse(JSON.stringify(BASE_MAP)); 
                 fullResetGame(); gameState = 'READY'; readyTimer = 120; 
             }
             else if (mainMenuIndex === 1) { fetchLevels(); }
             else if (mainMenuIndex === 2) { fetchScores(); }
             else if (mainMenuIndex === 3) { 
-                mapMatrix = JSON.parse(JSON.stringify(BASE_MAP)); // Limpia matriz para editor
+                mapMatrix = JSON.parse(JSON.stringify(BASE_MAP)); 
                 gameState = 'EDITOR'; 
             }
         }
@@ -302,6 +299,7 @@ function getTileDistance(c1, r1, c2, r2) {
     if (dc > COLS / 2) dc = COLS - dc; 
     return Math.hypot(dc, dr);
 }
+
 function getDistance(x1, y1, x2, y2) { return Math.hypot(x2 - x1, y2 - y1); }
 
 function isPlayerColliding(newX, newY) {
@@ -341,7 +339,6 @@ function updatePlayer() {
     if (!isPlayerColliding(nextX, player.y)) player.x = nextX;
     if (!isPlayerColliding(player.x, nextY)) player.y = nextY;
     
-    // Cruce de pantalla tradicional (Bordes)
     if (player.x < -TILE_SIZE) player.x = canvas.width;
     if (player.x > canvas.width) player.x = -TILE_SIZE;
 }
@@ -350,10 +347,14 @@ function getEnemyMove(enemy, targetCol, targetRow) {
     if (enemy.x % TILE_SIZE === 0 && enemy.y % TILE_SIZE === 0) {
         const col = enemy.x / TILE_SIZE, row = enemy.y / TILE_SIZE;
         let bestDir = enemy.currentDir, minDistance = Infinity, validMoves = [];
+        
         for (let dir of ['UP', 'DOWN', 'LEFT', 'RIGHT']) {
             if (dir === OPPOSITE_DIR[enemy.currentDir]) continue; 
-            if (getMapTile(col + DIRS[dir].dx, row + DIRS[dir].dy) !== 1) validMoves.push(dir);
+            if (enemy.isDead || getMapTile(col + DIRS[dir].dx, row + DIRS[dir].dy) !== 1) {
+                validMoves.push(dir);
+            }
         }
+        
         if (validMoves.length === 0) bestDir = OPPOSITE_DIR[enemy.currentDir];
         else {
             for (let dir of validMoves) {
@@ -397,14 +398,13 @@ function updateEnemies() {
     if (!enemyDelta.active && dotsEatenThisLife >= enemyDelta.releaseDots) { enemyDelta.active = true; enemyDelta.x = 9 * TILE_SIZE; enemyDelta.y = 7 * TILE_SIZE; }
 
     modeTimer++;
-    if (enemyMode === 'FRIGHTENED' && modeTimer > FRIGHTENED_DURATION) { enemyMode = 'CHASE'; modeTimer = 0; } 
+    if (enemyMode === 'FRIGHTENED' && modeTimer > FRIGHTENED_DURATION) { enemyMode = 'CHASE'; modeTimer = 0; enemiesEatenThisPowerup = 0; } 
     else if (enemyMode === 'CHASE' && modeTimer > CHASE_DURATION) { enemyMode = 'SCATTER'; modeTimer = 0; } 
     else if (enemyMode === 'SCATTER' && modeTimer > SCATTER_DURATION) { enemyMode = 'CHASE'; modeTimer = 0; }
 
     let pCol = Math.floor(player.x / TILE_SIZE), pRow = Math.floor(player.y / TILE_SIZE);
     let aCol = Math.floor(enemyAlpha.x / TILE_SIZE), aRow = Math.floor(enemyAlpha.y / TILE_SIZE);
     let currentEnemySpeed = (enemyMode === 'FRIGHTENED') ? 1 : 2;
-    enemiesList.forEach(e => { if(e.active) e.speed = currentEnemySpeed; });
 
     if (enemyMode === 'FRIGHTENED') {
         currentTargets.alpha = { c: aCol - (pCol - aCol), r: aRow - (pRow - aRow) };
@@ -433,43 +433,91 @@ function updateEnemies() {
         if (currentTargets[t].c < 0) currentTargets[t].c = COLS + (currentTargets[t].c % COLS);
         if (currentTargets[t].c >= COLS) currentTargets[t].c = currentTargets[t].c % COLS;
     }
-    
-    if (enemyAlpha.active) getEnemyMove(enemyAlpha, currentTargets.alpha.c, currentTargets.alpha.r); else updateInactiveEnemy(enemyAlpha);
-    if (enemyBeta.active) getEnemyMove(enemyBeta, currentTargets.beta.c, currentTargets.beta.r); else updateInactiveEnemy(enemyBeta);
-    if (enemyGamma.active) getEnemyMove(enemyGamma, currentTargets.gamma.c, currentTargets.gamma.r); else updateInactiveEnemy(enemyGamma);
-    if (enemyDelta.active) getEnemyMove(enemyDelta, currentTargets.delta.c, currentTargets.delta.r); else updateInactiveEnemy(enemyDelta);
+
+    enemiesList.forEach(e => {
+        if (!e.active) {
+            updateInactiveEnemy(e);
+            return;
+        }
+        
+        // CÓDIGO CORREGIDO: Redondeo matemático para que no pierdan su alineación con la cuadrícula
+        let targetSpeed = e.isDead ? 4 : currentEnemySpeed;
+        if (e.speed !== targetSpeed) {
+            e.speed = targetSpeed;
+            e.x = Math.round(e.x / e.speed) * e.speed;
+            e.y = Math.round(e.y / e.speed) * e.speed;
+        }
+
+        if (e.isDead) {
+            let eCol = Math.floor((e.x + TILE_SIZE/2) / TILE_SIZE);
+            let eRow = Math.floor((e.y + TILE_SIZE/2) / TILE_SIZE);
+            if (eCol >= 8 && eCol <= 11 && eRow >= 7 && eRow <= 9) {
+                e.isDead = false; 
+                e.x = 9 * TILE_SIZE;
+                e.y = 8 * TILE_SIZE;
+                e.speed = currentEnemySpeed; // Se reinicia su velocidad al revivir
+            }
+        }
+        
+        let eCol = Math.floor(e.x / TILE_SIZE);
+        let eRow = Math.floor(e.y / TILE_SIZE);
+        let inBase = (eCol >= 8 && eCol <= 11 && eRow >= 7 && eRow <= 9); 
+        
+        let target;
+        if (e.isDead) {
+            target = { c: 9, r: 8 }; 
+        } else if (inBase) {
+            target = { c: 9, r: 6 }; 
+        } else {
+            if (e === enemyAlpha) target = currentTargets.alpha;
+            else if (e === enemyBeta) target = currentTargets.beta;
+            else if (e === enemyGamma) target = currentTargets.gamma;
+            else if (e === enemyDelta) target = currentTargets.delta;
+        }
+        
+        getEnemyMove(e, target.c, target.r);
+    });
 }
 
 function checkCollisions() {
-    // 1. Recolección de puntos
     for (let dot of dots) {
         if (!dot.collected && getDistance(player.x + TILE_SIZE/2, player.y + TILE_SIZE/2, dot.x, dot.y) < 10) {
             dot.collected = true; dotsRemaining--; dotsEatenThisLife++;
-            if (dot.isPowerUp) { score += 50; enemyMode = 'FRIGHTENED'; modeTimer = 0; } 
-            else { score += 10; }
+            if (dot.isPowerUp) { 
+                score += 50; 
+                enemyMode = 'FRIGHTENED'; 
+                modeTimer = 0; 
+                enemiesEatenThisPowerup = 0; 
+            } else { 
+                score += 10; 
+            }
         }
     }
     if (dotsRemaining <= 0) { submitScoreAuto(); gameState = 'VICTORY'; debugPanel.style.display = 'none'; }
 
-    // 2. Colisión con enemigos
     for (let enemy of enemiesList) {
-        if (enemy.active && getDistance(player.x, player.y, enemy.x, enemy.y) < TILE_SIZE - 8) {
+        if (enemy.active && !enemy.isDead && getDistance(player.x, player.y, enemy.x, enemy.y) < TILE_SIZE - 8) {
             if (enemyMode === 'FRIGHTENED') {
-                score += 200; enemy.active = false; enemy.x = 9 * TILE_SIZE; enemy.y = 8 * TILE_SIZE; 
+                let comboPoints = 200 * Math.pow(2, enemiesEatenThisPowerup);
+                score += comboPoints;
+                
+                floatingTexts.push({ x: enemy.x, y: enemy.y, text: `+${comboPoints}`, timer: 60 });
+                
+                enemiesEatenThisPowerup++;
+                enemy.isDead = true; 
+                enemy.currentDir = OPPOSITE_DIR[enemy.currentDir] !== 'NONE' ? OPPOSITE_DIR[enemy.currentDir] : 'UP'; 
             } else {
                 gameState = 'DYING'; deathTimer = 60; break; 
             }
         }
     }
 
-    // 3. FÍSICA DE PORTALES (Baldosas con valor 3)
     if (portalCooldown <= 0) {
         let pCol = Math.floor((player.x + TILE_SIZE/2) / TILE_SIZE);
         let pRow = Math.floor((player.y + TILE_SIZE/2) / TILE_SIZE);
         
         if (pRow >= 0 && pRow < ROWS && pCol >= 0 && pCol < COLS && mapMatrix[pRow][pCol] === 3) {
             let portals = [];
-            // Busca cualquier otro portal en el mapa
             for(let r = 0; r < ROWS; r++) {
                 for(let c = 0; c < COLS; c++) {
                     if (mapMatrix[r][c] === 3 && (r !== pRow || c !== pCol)) {
@@ -477,12 +525,11 @@ function checkCollisions() {
                     }
                 }
             }
-            // Si hay otro portal, teletransporta al jugador
             if (portals.length > 0) {
                 let dest = portals[Math.floor(Math.random() * portals.length)];
                 player.x = dest.c * TILE_SIZE;
                 player.y = dest.r * TILE_SIZE;
-                portalCooldown = 60; // 1 segundo de pausa para no bugearse
+                portalCooldown = 60; 
             }
         }
     }
@@ -557,6 +604,15 @@ function drawEntity(entity, isPlayer) {
         ctx.fillRect(-entity.size/2, -entity.size/2, entity.size, entity.size);
         ctx.restore();
     } else {
+        if (entity.isDead) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0)'; 
+            ctx.fillRect(entity.x + 4, entity.y + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+            ctx.fillStyle = 'white'; 
+            ctx.fillRect(entity.x + 8, entity.y + 10, 4, 4); 
+            ctx.fillRect(entity.x + 20, entity.y + 10, 4, 4);
+            return;
+        }
+        
         if (enemyMode === 'FRIGHTENED') ctx.fillStyle = (modeTimer > FRIGHTENED_DURATION - 120 && Math.floor(Date.now() / 200) % 2 === 0) ? '#ffffff' : '#0033ff';
         else ctx.fillStyle = entity.color;
         
@@ -651,7 +707,6 @@ function drawMenus() {
             ctx.fillStyle = '#ffffff';
             ctx.fillText('No hay niveles guardados aún.', canvas.width / 2, canvas.height / 2);
         } else {
-            // Mostramos los niveles disponibles (hasta un máximo de 10 por pantalla)
             let start = Math.max(0, levelMenuIndex - 5);
             let end = Math.min(savedLevels.length, start + 10);
             for (let i = start; i < end; i++) {
@@ -729,6 +784,16 @@ function gameLoop(timestamp) {
         drawEntity(enemyBeta, false); 
         drawEntity(enemyGamma, false); 
         drawEntity(enemyDelta, false); 
+        
+        for (let i = floatingTexts.length - 1; i >= 0; i--) {
+            let ft = floatingTexts[i];
+            ctx.fillStyle = '#ffff00';
+            ctx.font = 'bold 20px Courier New';
+            ctx.fillText(ft.text, ft.x, ft.y);
+            ft.y -= 1; 
+            ft.timer--; 
+            if (ft.timer <= 0) floatingTexts.splice(i, 1);
+        }
     }
     
     drawDebug();
