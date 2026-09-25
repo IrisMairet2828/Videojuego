@@ -32,6 +32,10 @@ const TILE_SIZE = 32;
 const COLS = 20;
 const ROWS = 20;
 
+// NUEVO: Sistema de carga de Sprite Sheet
+const spriteSheet = new Image();
+spriteSheet.src = 'img/sprites.png'; // Ruta donde guardarás tu imagen final
+
 const BASE_MAP = [
     [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
     [1,2,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,2,1],
@@ -56,8 +60,6 @@ const BASE_MAP = [
 ];
 
 let mapMatrix = JSON.parse(JSON.stringify(BASE_MAP));
-
-// NUEVO: Estado inicial para la Pantalla de Inicio
 let gameState = 'TITLE'; 
 let readyTimer = 0;
 let deathTimer = 0;
@@ -69,7 +71,6 @@ let lastFpsUpdate = 0;
 let currentTargets = { alpha: null, beta: null, gamma: null, delta: null };
 
 let mainMenuIndex = 0;
-// NUEVO: Opciones añadidas al menú
 const mainOptions = ['Jugar (Mapa Base)', 'Niveles Guardados', 'Ver Récords (Top 10)', 'Editor de Niveles', 'Instrucciones', 'Créditos'];
 let pauseMenuIndex = 0;
 const pauseOptions = ['Continuar', 'Reiniciar', 'Salir al Menú'];
@@ -91,13 +92,13 @@ const FRIGHTENED_DURATION = 60 * 7;
 let enemiesEatenThisPowerup = 0; 
 let floatingTexts = []; 
 
-let player = { x: 9 * TILE_SIZE, y: 3 * TILE_SIZE, speed: 2, currentDir: 'NONE', nextDir: 'NONE', color: '#00ffcc', size: TILE_SIZE - 8 };
+let player = { x: 9 * TILE_SIZE, y: 3 * TILE_SIZE, speed: 2, currentDir: 'NONE', nextDir: 'NONE', color: '#00ffcc', size: TILE_SIZE - 4 };
 let portalCooldown = 0; 
 
-let enemyAlpha = { x: 9 * TILE_SIZE, y: 6 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ff0044', active: true, isDead: false, releaseDots: 0 };
-let enemyBeta = { x: 9 * TILE_SIZE, y: 8 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ffb8ff', active: false, isDead: false, releaseDots: 20 };
-let enemyGamma = { x: 10 * TILE_SIZE, y: 8 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#00aaff', active: false, isDead: false, releaseDots: 50 };
-let enemyDelta = { x: 9 * TILE_SIZE, y: 9 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ffaa00', active: false, isDead: false, releaseDots: 90 };
+let enemyAlpha = { x: 9 * TILE_SIZE, y: 6 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ff0044', active: true, isDead: false, releaseDots: 0, type: 0, size: TILE_SIZE - 4 };
+let enemyBeta = { x: 9 * TILE_SIZE, y: 8 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ffb8ff', active: false, isDead: false, releaseDots: 20, type: 1, size: TILE_SIZE - 4 };
+let enemyGamma = { x: 10 * TILE_SIZE, y: 8 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#00aaff', active: false, isDead: false, releaseDots: 50, type: 2, size: TILE_SIZE - 4 };
+let enemyDelta = { x: 9 * TILE_SIZE, y: 9 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ffaa00', active: false, isDead: false, releaseDots: 90, type: 3, size: TILE_SIZE - 4 };
 const enemiesList = [enemyAlpha, enemyBeta, enemyGamma, enemyDelta];
 
 let score = 0;
@@ -123,7 +124,7 @@ function initDots() {
 
 function resetPositions() {
     player.x = 9 * TILE_SIZE; player.y = 3 * TILE_SIZE; 
-    player.currentDir = 'NONE'; player.nextDir = 'NONE'; player.size = TILE_SIZE - 8;
+    player.currentDir = 'NONE'; player.nextDir = 'NONE'; player.size = TILE_SIZE - 4;
     dotsEatenThisLife = 0;
     portalCooldown = 0;
     enemiesEatenThisPowerup = 0;
@@ -200,33 +201,18 @@ canvas.addEventListener('mousedown', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-    if (e.key === 'F2') {
-        debugMode = !debugMode;
-        e.preventDefault();
-        return;
-    }
+    if (e.key === 'F2') { debugMode = !debugMode; e.preventDefault(); return; }
 
-    if (gameState === 'TITLE') {
-        if (e.key === 'Enter') {
-            gameState = 'START';
-        }
-        return;
-    }
+    if (gameState === 'TITLE') { if (e.key === 'Enter') gameState = 'START'; return; }
 
     if (gameState === 'START') {
         if (e.key === 'ArrowUp') mainMenuIndex = mainMenuIndex - 1 < 0 ? mainOptions.length - 1 : mainMenuIndex - 1;
         if (e.key === 'ArrowDown') mainMenuIndex = mainMenuIndex + 1 >= mainOptions.length ? 0 : mainMenuIndex + 1;
         if (e.key === 'Enter') {
-            if (mainMenuIndex === 0) { 
-                mapMatrix = JSON.parse(JSON.stringify(BASE_MAP)); 
-                fullResetGame(); gameState = 'READY'; readyTimer = 120; 
-            }
+            if (mainMenuIndex === 0) { mapMatrix = JSON.parse(JSON.stringify(BASE_MAP)); fullResetGame(); gameState = 'READY'; readyTimer = 120; }
             else if (mainMenuIndex === 1) { fetchLevels(); }
             else if (mainMenuIndex === 2) { fetchScores(); }
-            else if (mainMenuIndex === 3) { 
-                mapMatrix = JSON.parse(JSON.stringify(BASE_MAP)); 
-                gameState = 'EDITOR'; 
-            }
+            else if (mainMenuIndex === 3) { mapMatrix = JSON.parse(JSON.stringify(BASE_MAP)); gameState = 'EDITOR'; }
             else if (mainMenuIndex === 4) { gameState = 'MENU_INSTRUCTIONS'; }
             else if (mainMenuIndex === 5) { gameState = 'MENU_CREDITS'; }
         }
@@ -234,7 +220,7 @@ document.addEventListener('keydown', (e) => {
     }
 
     if (gameState === 'MENU_INSTRUCTIONS' || gameState === 'MENU_CREDITS') {
-        if (e.key === 'Escape' || e.key === 'Enter') { gameState = 'START'; }
+        if (e.key === 'Escape' || e.key === 'Enter') gameState = 'START';
         return;
     }
 
@@ -243,10 +229,7 @@ document.addEventListener('keydown', (e) => {
         if (savedLevels.length > 0) {
             if (e.key === 'ArrowUp') levelMenuIndex = levelMenuIndex - 1 < 0 ? savedLevels.length - 1 : levelMenuIndex - 1;
             if (e.key === 'ArrowDown') levelMenuIndex = levelMenuIndex + 1 >= savedLevels.length ? 0 : levelMenuIndex + 1;
-            if (e.key === 'Enter') {
-                mapMatrix = JSON.parse(JSON.stringify(savedLevels[levelMenuIndex].matrix));
-                fullResetGame(); gameState = 'READY'; readyTimer = 120;
-            }
+            if (e.key === 'Enter') { mapMatrix = JSON.parse(JSON.stringify(savedLevels[levelMenuIndex].matrix)); fullResetGame(); gameState = 'READY'; readyTimer = 120; }
         }
         return;
     }
@@ -256,11 +239,7 @@ document.addEventListener('keydown', (e) => {
         if (e.key.toLowerCase() === 's') {
             const levelName = prompt("Ingresa un nombre para tu nivel:");
             if (levelName) {
-                fetch('http://localhost:3000/api/levels', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: levelName, matrix: mapMatrix })
-                })
+                fetch('http://localhost:3000/api/levels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: levelName, matrix: mapMatrix }) })
                 .then(() => alert("¡Nivel guardado!"))
                 .catch(() => alert("Error al guardar nivel."));
             }
@@ -280,9 +259,7 @@ document.addEventListener('keydown', (e) => {
         return;
     }
 
-    if ((gameState === 'GAMEOVER' || gameState === 'VICTORY') && e.key === 'Enter') { 
-        gameState = 'START'; return; 
-    }
+    if ((gameState === 'GAMEOVER' || gameState === 'VICTORY') && e.key === 'Enter') { gameState = 'START'; return; }
 
     if (gameState === 'PLAYING' || gameState === 'READY') {
         if (e.key === 'Escape') { gameState = 'PAUSED'; pauseMenuIndex = 0; return; }
@@ -451,10 +428,7 @@ function updateEnemies() {
     }
 
     enemiesList.forEach(e => {
-        if (!e.active) {
-            updateInactiveEnemy(e);
-            return;
-        }
+        if (!e.active) { updateInactiveEnemy(e); return; }
         
         let targetSpeed = e.isDead ? 4 : currentEnemySpeed;
         if (e.speed !== targetSpeed) {
@@ -479,17 +453,14 @@ function updateEnemies() {
         let inBase = (eCol >= 8 && eCol <= 11 && eRow >= 7 && eRow <= 9); 
         
         let target;
-        if (e.isDead) {
-            target = { c: 9, r: 8 }; 
-        } else if (inBase) {
-            target = { c: 9, r: 6 }; 
-        } else {
+        if (e.isDead) { target = { c: 9, r: 8 }; } 
+        else if (inBase) { target = { c: 9, r: 6 }; } 
+        else {
             if (e === enemyAlpha) target = currentTargets.alpha;
             else if (e === enemyBeta) target = currentTargets.beta;
             else if (e === enemyGamma) target = currentTargets.gamma;
             else if (e === enemyDelta) target = currentTargets.delta;
         }
-        
         getEnemyMove(e, target.c, target.r);
     });
 }
@@ -499,13 +470,8 @@ function checkCollisions() {
         if (!dot.collected && getDistance(player.x + TILE_SIZE/2, player.y + TILE_SIZE/2, dot.x, dot.y) < 10) {
             dot.collected = true; dotsRemaining--; dotsEatenThisLife++;
             if (dot.isPowerUp) { 
-                score += 50; 
-                enemyMode = 'FRIGHTENED'; 
-                modeTimer = 0; 
-                enemiesEatenThisPowerup = 0; 
-            } else { 
-                score += 10; 
-            }
+                score += 50; enemyMode = 'FRIGHTENED'; modeTimer = 0; enemiesEatenThisPowerup = 0; 
+            } else { score += 10; }
         }
     }
     if (dotsRemaining <= 0) { submitScoreAuto(); gameState = 'VICTORY'; debugPanel.style.display = 'none'; }
@@ -515,9 +481,7 @@ function checkCollisions() {
             if (enemyMode === 'FRIGHTENED') {
                 let comboPoints = 200 * Math.pow(2, enemiesEatenThisPowerup);
                 score += comboPoints;
-                
                 floatingTexts.push({ x: enemy.x, y: enemy.y, text: `+${comboPoints}`, timer: 60 });
-                
                 enemiesEatenThisPowerup++;
                 enemy.isDead = true; 
                 enemy.currentDir = OPPOSITE_DIR[enemy.currentDir] !== 'NONE' ? OPPOSITE_DIR[enemy.currentDir] : 'UP'; 
@@ -535,16 +499,12 @@ function checkCollisions() {
             let portals = [];
             for(let r = 0; r < ROWS; r++) {
                 for(let c = 0; c < COLS; c++) {
-                    if (mapMatrix[r][c] === 3 && (r !== pRow || c !== pCol)) {
-                        portals.push({r, c});
-                    }
+                    if (mapMatrix[r][c] === 3 && (r !== pRow || c !== pCol)) { portals.push({r, c}); }
                 }
             }
             if (portals.length > 0) {
                 let dest = portals[Math.floor(Math.random() * portals.length)];
-                player.x = dest.c * TILE_SIZE;
-                player.y = dest.r * TILE_SIZE;
-                portalCooldown = 60; 
+                player.x = dest.c * TILE_SIZE; player.y = dest.r * TILE_SIZE; portalCooldown = 60; 
             }
         }
     }
@@ -554,9 +514,7 @@ function submitScoreAuto() {
     if (scoreSubmitted) return;
     scoreSubmitted = true;
     fetch('http://localhost:3000/api/scores', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'PLAYER', score: score })
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'PLAYER', score: score })
     }).catch(() => {});
 }
 
@@ -609,30 +567,116 @@ function drawDots() {
     }
 }
 
+// NUEVO: Función refactorizada que maneja tanto Sprite Sheets reales como dibujos vectoriales animados si no hay imagen
 function drawEntity(entity, isPlayer) {
     if (gameState === 'EDITOR') return;
-    if (isPlayer) {
-        ctx.save();
-        ctx.translate(entity.x + TILE_SIZE/2, entity.y + TILE_SIZE/2);
-        if (gameState === 'DYING') ctx.rotate(deathTimer * 0.5);
-        ctx.fillStyle = entity.color;
-        ctx.fillRect(-entity.size/2, -entity.size/2, entity.size, entity.size);
-        ctx.restore();
-    } else {
-        if (entity.isDead) {
-            ctx.fillStyle = 'rgba(0, 0, 0, 0)'; 
-            ctx.fillRect(entity.x + 4, entity.y + 4, TILE_SIZE - 8, TILE_SIZE - 8);
-            ctx.fillStyle = 'white'; 
-            ctx.fillRect(entity.x + 8, entity.y + 10, 4, 4); 
-            ctx.fillRect(entity.x + 20, entity.y + 10, 4, 4);
-            return;
+    
+    let animFrame = Math.floor(Date.now() / 150) % 2; 
+    // Tamaño seguro para cualquier entidad. Los enemigos antes no tenían 'size',
+    // lo que hacía que drawImage recibiera NaN y por eso no se dibujaran.
+    const drawSize = entity.size ?? (TILE_SIZE - 4);
+
+    if (spriteSheet.complete && spriteSheet.naturalWidth > 0) {
+        // Lógica oficial para Sprite Sheets (Cumplimiento de rúbrica)
+        let row = 0, col = 0;
+        
+        if (isPlayer) {
+            row = 0;
+            if (player.currentDir === 'RIGHT') col = 0;
+            else if (player.currentDir === 'LEFT') col = 2;
+            else if (player.currentDir === 'UP') col = 4;
+            else col = 6;
+            col += animFrame;
+        } else {
+            if (entity.isDead) {
+                row = 6; // Fila de ojos
+                if (entity.currentDir === 'RIGHT') col = 0;
+                else if (entity.currentDir === 'LEFT') col = 1;
+                else if (entity.currentDir === 'UP') col = 2;
+                else col = 3;
+            } else if (enemyMode === 'FRIGHTENED') {
+                row = 5; // Fila asustados
+                col = (modeTimer > FRIGHTENED_DURATION - 120 && animFrame === 1) ? 2 : animFrame;
+            } else {
+                row = entity.type + 1; // Filas 1 a 4 según color de fantasma
+                if (entity.currentDir === 'RIGHT') col = 0;
+                else if (entity.currentDir === 'LEFT') col = 2;
+                else if (entity.currentDir === 'UP') col = 4;
+                else col = 6;
+                col += animFrame;
+            }
         }
         
-        if (enemyMode === 'FRIGHTENED') ctx.fillStyle = (modeTimer > FRIGHTENED_DURATION - 120 && Math.floor(Date.now() / 200) % 2 === 0) ? '#ffffff' : '#0033ff';
-        else ctx.fillStyle = entity.color;
+        ctx.save();
+        if (isPlayer && gameState === 'DYING') {
+            ctx.translate(entity.x + TILE_SIZE/2, entity.y + TILE_SIZE/2);
+            ctx.rotate(deathTimer * 0.5);
+            ctx.drawImage(spriteSheet, col * 32, row * 32, 32, 32, -drawSize/2, -drawSize/2, drawSize, drawSize);
+        } else {
+            ctx.drawImage(spriteSheet, col * 32, row * 32, 32, 32, entity.x + (32 - drawSize)/2, entity.y + (32 - drawSize)/2, drawSize, drawSize);
+        }
+        ctx.restore();
+
+    } else {
+        // FALLBACK VECTORIAL ANIMADO: Si no tienes el sprites.png en la carpeta 'img', dibujará formas animadas hermosas en Canvas
+        ctx.save();
+        ctx.translate(entity.x + TILE_SIZE/2, entity.y + TILE_SIZE/2);
         
-        ctx.fillRect(entity.x + 4, entity.y + 4, TILE_SIZE - 8, TILE_SIZE - 8);
-        ctx.fillStyle = 'white'; ctx.fillRect(entity.x + 8, entity.y + 10, 4, 4); ctx.fillRect(entity.x + 20, entity.y + 10, 4, 4);
+        if (isPlayer) {
+            if (gameState === 'DYING') ctx.rotate(deathTimer * 0.5);
+            let angleOffset = 0;
+            if (entity.currentDir === 'DOWN') angleOffset = Math.PI / 2;
+            else if (entity.currentDir === 'LEFT') angleOffset = Math.PI;
+            else if (entity.currentDir === 'UP') angleOffset = -Math.PI / 2;
+            
+            ctx.rotate(angleOffset);
+            let mouthOpen = (animFrame === 0 && entity.currentDir !== 'NONE') ? 0.25 : 0.05;
+            
+            ctx.fillStyle = entity.color;
+            ctx.beginPath();
+            ctx.arc(0, 0, drawSize/2, mouthOpen * Math.PI, (2 - mouthOpen) * Math.PI);
+            ctx.lineTo(0, 0);
+            ctx.fill();
+        } else {
+            if (entity.isDead) {
+                // Solo Ojos
+                ctx.fillStyle = 'white';
+                ctx.beginPath(); ctx.arc(-6, -4, 4, 0, Math.PI*2); ctx.arc(6, -4, 4, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = 'blue';
+                let eyeOffset = entity.currentDir === 'RIGHT' ? 2 : entity.currentDir === 'LEFT' ? -2 : 0;
+                let eyeOffsetY = entity.currentDir === 'DOWN' ? 2 : entity.currentDir === 'UP' ? -2 : 0;
+                ctx.beginPath(); ctx.arc(-6 + eyeOffset, -4 + eyeOffsetY, 2, 0, Math.PI*2); ctx.arc(6 + eyeOffset, -4 + eyeOffsetY, 2, 0, Math.PI*2); ctx.fill();
+            } else {
+                ctx.fillStyle = (enemyMode === 'FRIGHTENED') ? ((modeTimer > FRIGHTENED_DURATION - 120 && animFrame === 1) ? '#ffffff' : '#0033ff') : entity.color;
+                
+                // Cuerpo ondulado del fantasma
+                ctx.beginPath();
+                let r = drawSize/2;
+                ctx.arc(0, -2, r, Math.PI, 0);
+                ctx.lineTo(r, r);
+                
+                // Falda ondulada animada
+                let waveCount = 3;
+                let waveWidth = (r * 2) / waveCount;
+                let wavePhase = animFrame === 0 ? 0 : 2;
+                for (let i = waveCount; i > 0; i--) {
+                    ctx.quadraticCurveTo(r - (waveWidth * i) + (waveWidth / 2), r - 4 + wavePhase, r - (waveWidth * i), r);
+                }
+                
+                ctx.lineTo(-r, r);
+                ctx.fill();
+
+                // Ojos
+                ctx.fillStyle = (enemyMode === 'FRIGHTENED') ? '#ffaaff' : 'white';
+                ctx.beginPath(); ctx.arc(-6, -4, 4, 0, Math.PI*2); ctx.arc(6, -4, 4, 0, Math.PI*2); ctx.fill();
+                
+                ctx.fillStyle = (enemyMode === 'FRIGHTENED') ? '#ff0000' : 'blue';
+                let eyeOffset = entity.currentDir === 'RIGHT' ? 2 : entity.currentDir === 'LEFT' ? -2 : 0;
+                let eyeOffsetY = entity.currentDir === 'DOWN' ? 2 : entity.currentDir === 'UP' ? -2 : 0;
+                ctx.beginPath(); ctx.arc(-6 + eyeOffset, -4 + eyeOffsetY, 2, 0, Math.PI*2); ctx.arc(6 + eyeOffset, -4 + eyeOffsetY, 2, 0, Math.PI*2); ctx.fill();
+            }
+        }
+        ctx.restore();
     }
 }
 
@@ -865,9 +909,7 @@ function gameLoop(timestamp) {
     }
     
     drawDebug();
-
     if (gameState !== 'START' && gameState !== 'MENU_SCORES' && gameState !== 'MENU_LEVELS' && gameState !== 'TITLE' && gameState !== 'MENU_INSTRUCTIONS' && gameState !== 'MENU_CREDITS') drawUI(); 
-    
     drawMenus(); 
     
     requestAnimationFrame(gameLoop);
