@@ -529,7 +529,8 @@ canvas.addEventListener('mousedown', (e) => {
 
 document.addEventListener('keydown', (e) => {
     if (e.key === 'F2') { debugMode = !debugMode; e.preventDefault(); return; }
-    if (e.key.toLowerCase() === 'm') {
+    // M controla el audio, excepto cuando estás escribiendo tu nombre para el récord.
+    if (e.key.toLowerCase() === 'm' && gameState !== 'ENTER_NAME') {
         if (window.gameAudio) {
             const enabled = window.gameAudio.toggle();
             console.log('Audio: ' + (enabled ? 'ACTIVADO' : 'SILENCIADO'));
