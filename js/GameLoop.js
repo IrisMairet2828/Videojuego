@@ -22,7 +22,11 @@ if (!debugPanel) {
     debugPanel.style.fontSize = '16px';
     debugPanel.style.color = '#00ffcc';
     debugPanel.style.display = 'none'; 
-    debugPanel.style.minWidth = '220px';
+    debugPanel.style.width = '360px';
+    debugPanel.style.minWidth = '360px';
+    debugPanel.style.maxWidth = '360px';
+    debugPanel.style.boxSizing = 'border-box';
+    debugPanel.style.flexShrink = '0';
     debugPanel.style.boxShadow = '0 0 15px rgba(0, 255, 204, 0.3)';
 
     wrapper.appendChild(debugPanel);
@@ -84,21 +88,31 @@ let levelMenuIndex = 0;
 const DIRS = { 'UP': { dx: 0, dy: -1 }, 'DOWN': { dx: 0, dy: 1 }, 'LEFT': { dx: -1, dy: 0 }, 'RIGHT': { dx: 1, dy: 0 }, 'NONE': { dx: 0, dy: 0 } };
 const OPPOSITE_DIR = { 'UP': 'DOWN', 'DOWN': 'UP', 'LEFT': 'RIGHT', 'RIGHT': 'LEFT', 'NONE': 'NONE' };
 
-let enemyMode = 'CHASE'; 
+let enemyMode = 'SCATTER';
+let modeBeforeFrightened = 'SCATTER';
 let modeTimer = 0;
-const CHASE_DURATION = 60 * 15;  
-const SCATTER_DURATION = 60 * 5; 
-const FRIGHTENED_DURATION = 60 * 7; 
-let enemiesEatenThisPowerup = 0; 
-let floatingTexts = []; 
+let currentLevel = 1;
+let levelTemplateMap = JSON.parse(JSON.stringify(BASE_MAP));
+
+// La dificultad se calcula por nivel. Estos valores son la base del nivel 1.
+const BASE_CHASE_DURATION = 60 * 15;
+const BASE_SCATTER_DURATION = 60 * 5;
+const BASE_FRIGHTENED_DURATION = 60 * 7;
+let CHASE_DURATION = BASE_CHASE_DURATION;
+let SCATTER_DURATION = BASE_SCATTER_DURATION;
+let FRIGHTENED_DURATION = BASE_FRIGHTENED_DURATION;
+let enemiesEatenThisPowerup = 0;
+let floatingTexts = [];
+let currentPaths = { alpha: [], beta: [], gamma: [], delta: [] };
+
 
 let player = { x: 9 * TILE_SIZE, y: 3 * TILE_SIZE, speed: 2, currentDir: 'NONE', nextDir: 'NONE', color: '#00ffcc', size: TILE_SIZE - 4 };
 let portalCooldown = 0; 
 
-let enemyAlpha = { x: 9 * TILE_SIZE, y: 6 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ff0044', active: true, isDead: false, releaseDots: 0, type: 0, size: TILE_SIZE - 4 };
-let enemyBeta = { x: 9 * TILE_SIZE, y: 8 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ffb8ff', active: false, isDead: false, releaseDots: 20, type: 1, size: TILE_SIZE - 4 };
-let enemyGamma = { x: 10 * TILE_SIZE, y: 8 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#00aaff', active: false, isDead: false, releaseDots: 50, type: 2, size: TILE_SIZE - 4 };
-let enemyDelta = { x: 9 * TILE_SIZE, y: 9 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ffaa00', active: false, isDead: false, releaseDots: 90, type: 3, size: TILE_SIZE - 4 };
+let enemyAlpha = { x: 9 * TILE_SIZE, y: 6 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ff0044', active: true, isDead: false, releaseDots: 0, type: 0, size: TILE_SIZE - 4, state: 'SPAWN', spawnTimer: 45 };
+let enemyBeta = { x: 9 * TILE_SIZE, y: 8 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ffb8ff', active: false, isDead: false, releaseDots: 20, type: 1, size: TILE_SIZE - 4, state: 'SPAWN', spawnTimer: 45 };
+let enemyGamma = { x: 10 * TILE_SIZE, y: 8 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#00aaff', active: false, isDead: false, releaseDots: 50, type: 2, size: TILE_SIZE - 4, state: 'SPAWN', spawnTimer: 45 };
+let enemyDelta = { x: 9 * TILE_SIZE, y: 9 * TILE_SIZE, speed: 2, currentDir: 'UP', color: '#ffaa00', active: false, isDead: false, releaseDots: 90, type: 3, size: TILE_SIZE - 4, state: 'SPAWN', spawnTimer: 45 };
 const enemiesList = [enemyAlpha, enemyBeta, enemyGamma, enemyDelta];
 
 let score = 0;
@@ -122,26 +136,102 @@ function initDots() {
     }
 }
 
+function applyDifficultySettings() {
+    // Nivel 1 = 2 px/frame. Cada nivel aumenta poco a poco sin romper el movimiento por Tiles.
+    const speedBoost = Math.min(1.5, (currentLevel - 1) * 0.15);
+    const normalSpeed = 2 + speedBoost;
+    enemiesList.forEach(e => e.baseSpeed = normalSpeed);
+
+    // Menos tiempo en SCATTER y más tiempo persiguiendo conforme sube el nivel.
+    CHASE_DURATION = Math.max(60 * 8, BASE_CHASE_DURATION - (currentLevel - 1) * 60);
+    SCATTER_DURATION = Math.max(60 * 2, BASE_SCATTER_DURATION - (currentLevel - 1) * 20);
+    FRIGHTENED_DURATION = Math.max(60 * 3, BASE_FRIGHTENED_DURATION - (currentLevel - 1) * 18);
+
+    // Los enemigos salen antes de la base en niveles altos.
+    enemyBeta.releaseDots = Math.max(8, 20 - (currentLevel - 1) * 2);
+    enemyGamma.releaseDots = Math.max(18, 50 - (currentLevel - 1) * 4);
+    enemyDelta.releaseDots = Math.max(30, 90 - (currentLevel - 1) * 6);
+}
+
+function isPlayerAreaReachable(testMap) {
+    const start = { c: 9, r: 3 };
+    const queue = [start];
+    const visited = new Set([`${start.c},${start.r}`]);
+    const isGhostHouse = (c, r) => r >= 7 && r <= 10 && c >= 6 && c <= 13;
+
+    while (queue.length) {
+        const node = queue.shift();
+        for (const dir of ['UP', 'DOWN', 'LEFT', 'RIGHT']) {
+            let nc = node.c + DIRS[dir].dx;
+            const nr = node.r + DIRS[dir].dy;
+            if (nc < 0) nc = COLS - 1;
+            if (nc >= COLS) nc = 0;
+            if (nr < 0 || nr >= ROWS || testMap[nr][nc] === 1 || isGhostHouse(nc, nr)) continue;
+            const key = `${nc},${nr}`;
+            if (!visited.has(key)) { visited.add(key); queue.push({ c: nc, r: nr }); }
+        }
+    }
+
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (testMap[r][c] !== 1 && !isGhostHouse(c, r) && !visited.has(`${c},${r}`)) return false;
+        }
+    }
+    return true;
+}
+
+function applyLevelMapComplexity() {
+    // Añade obstáculos gradualmente, pero solo conserva los que no rompen las rutas del mapa.
+    const candidates = [
+        {r:3,c:3},{r:3,c:16},{r:13,c:3},{r:13,c:16},{r:5,c:3},{r:5,c:16},
+        {r:15,c:6},{r:15,c:13},{r:1,c:6},{r:1,c:13},{r:9,c:3}
+    ];
+    const wallsToTry = Math.min(candidates.length, Math.floor((currentLevel - 1) / 2));
+    for (let i = 0; i < wallsToTry; i++) {
+        const {r, c} = candidates[i];
+        if (mapMatrix[r][c] !== 0) continue;
+        mapMatrix[r][c] = 1;
+        if (!isPlayerAreaReachable(mapMatrix)) mapMatrix[r][c] = 0;
+    }
+}
+
 function resetPositions() {
-    player.x = 9 * TILE_SIZE; player.y = 3 * TILE_SIZE; 
+    player.x = 9 * TILE_SIZE; player.y = 3 * TILE_SIZE;
     player.currentDir = 'NONE'; player.nextDir = 'NONE'; player.size = TILE_SIZE - 4;
     dotsEatenThisLife = 0;
     portalCooldown = 0;
     enemiesEatenThisPowerup = 0;
     floatingTexts = [];
+    currentPaths = { alpha: [], beta: [], gamma: [], delta: [] };
 
-    enemyAlpha.x = 9 * TILE_SIZE; enemyAlpha.y = 6 * TILE_SIZE; enemyAlpha.currentDir = 'UP'; enemyAlpha.active = true; enemyAlpha.isDead = false;
-    enemyBeta.active = false; enemyBeta.x = 9 * TILE_SIZE; enemyBeta.y = 8 * TILE_SIZE; enemyBeta.currentDir = 'UP'; enemyBeta.isDead = false;
-    enemyGamma.active = false; enemyGamma.x = 10 * TILE_SIZE; enemyGamma.y = 8 * TILE_SIZE; enemyGamma.currentDir = 'UP'; enemyGamma.isDead = false;
-    enemyDelta.active = false; enemyDelta.x = 9 * TILE_SIZE; enemyDelta.y = 9 * TILE_SIZE; enemyDelta.currentDir = 'UP'; enemyDelta.isDead = false;
-    
-    enemyMode = 'CHASE';
+    enemyAlpha.x = 9 * TILE_SIZE; enemyAlpha.y = 6 * TILE_SIZE; enemyAlpha.currentDir = 'UP'; enemyAlpha.active = true; enemyAlpha.isDead = false; enemyAlpha.state = 'SPAWN'; enemyAlpha.spawnTimer = 45; resetEnemyNavigation(enemyAlpha);
+    enemyBeta.active = false; enemyBeta.x = 9 * TILE_SIZE; enemyBeta.y = 8 * TILE_SIZE; enemyBeta.currentDir = 'UP'; enemyBeta.isDead = false; enemyBeta.state = 'SPAWN'; enemyBeta.spawnTimer = 45; resetEnemyNavigation(enemyBeta);
+    enemyGamma.active = false; enemyGamma.x = 10 * TILE_SIZE; enemyGamma.y = 8 * TILE_SIZE; enemyGamma.currentDir = 'UP'; enemyGamma.isDead = false; enemyGamma.state = 'SPAWN'; enemyGamma.spawnTimer = 45; resetEnemyNavigation(enemyGamma);
+    enemyDelta.active = false; enemyDelta.x = 9 * TILE_SIZE; enemyDelta.y = 9 * TILE_SIZE; enemyDelta.currentDir = 'UP'; enemyDelta.isDead = false; enemyDelta.state = 'SPAWN'; enemyDelta.spawnTimer = 45; resetEnemyNavigation(enemyDelta);
+
+    enemyMode = 'SCATTER';
+    modeBeforeFrightened = 'SCATTER';
     modeTimer = 0;
+    applyDifficultySettings();
 }
 
 function fullResetGame() {
-    score = 0; lives = 3; scoreSubmitted = false; playerName = '';
+    score = 0; lives = 3; scoreSubmitted = false; playerName = ''; currentLevel = 1;
+    levelTemplateMap = JSON.parse(JSON.stringify(mapMatrix));
+    mapMatrix = JSON.parse(JSON.stringify(levelTemplateMap));
+    applyDifficultySettings();
     initDots(); resetPositions();
+}
+
+function startNextLevel() {
+    currentLevel++;
+    mapMatrix = JSON.parse(JSON.stringify(levelTemplateMap));
+    applyDifficultySettings();
+    applyLevelMapComplexity();
+    initDots();
+    resetPositions();
+    gameState = 'READY';
+    readyTimer = 120;
 }
 
 function loseLife() {
@@ -259,7 +349,8 @@ document.addEventListener('keydown', (e) => {
         return;
     }
 
-    if ((gameState === 'GAMEOVER' || gameState === 'VICTORY') && e.key === 'Enter') { gameState = 'START'; return; }
+    if (gameState === 'GAMEOVER' && e.key === 'Enter') { gameState = 'START'; return; }
+    if (gameState === 'VICTORY' && e.key === 'Enter') { startNextLevel(); return; }
 
     if (gameState === 'PLAYING' || gameState === 'READY') {
         if (e.key === 'Escape') { gameState = 'PAUSED'; pauseMenuIndex = 0; return; }
@@ -336,131 +427,353 @@ function updatePlayer() {
     if (player.x > canvas.width) player.x = -TILE_SIZE;
 }
 
-function getEnemyMove(enemy, targetCol, targetRow) {
-    if (enemy.x % TILE_SIZE === 0 && enemy.y % TILE_SIZE === 0) {
-        const col = enemy.x / TILE_SIZE, row = enemy.y / TILE_SIZE;
-        let bestDir = enemy.currentDir, minDistance = Infinity, validMoves = [];
-        
-        for (let dir of ['UP', 'DOWN', 'LEFT', 'RIGHT']) {
-            if (dir === OPPOSITE_DIR[enemy.currentDir]) continue; 
-            if (enemy.isDead || getMapTile(col + DIRS[dir].dx, row + DIRS[dir].dy) !== 1) {
-                validMoves.push(dir);
-            }
+function nearestWalkableTarget(targetCol, targetRow) {
+    let tc = Math.round(targetCol);
+    let tr = Math.round(targetRow);
+    tc = ((tc % COLS) + COLS) % COLS;
+    tr = Math.max(0, Math.min(ROWS - 1, tr));
+
+    if (getMapTile(tc, tr) !== 1) return { c: tc, r: tr };
+
+    let best = null;
+    let bestDist = Infinity;
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (getMapTile(c, r) === 1) continue;
+            const d = getTileDistance(c, r, tc, tr);
+            if (d < bestDist) { bestDist = d; best = { c, r }; }
         }
-        
-        if (validMoves.length === 0) bestDir = OPPOSITE_DIR[enemy.currentDir];
-        else {
-            for (let dir of validMoves) {
-                let nextCol = col + DIRS[dir].dx;
-                if (nextCol < 0) nextCol = COLS - 1;
-                if (nextCol >= COLS) nextCol = 0;
-                
-                let nextRow = row + DIRS[dir].dy;
-                let dist = getTileDistance(nextCol, nextRow, targetCol, targetRow);
-                
-                for (let other of enemiesList) {
-                    if (other !== enemy && other.active && Math.floor(other.x/TILE_SIZE) === nextCol && Math.floor(other.y/TILE_SIZE) === nextRow) {
-                        dist += 20; 
-                    }
-                }
-                if (dist < minDistance) { minDistance = dist; bestDir = dir; }
-            }
-        }
-        enemy.currentDir = bestDir;
     }
-    
-    enemy.x += DIRS[enemy.currentDir].dx * enemy.speed; 
-    enemy.y += DIRS[enemy.currentDir].dy * enemy.speed;
-    
-    if (enemy.x < -TILE_SIZE) enemy.x = canvas.width; 
-    if (enemy.x > canvas.width) enemy.x = -TILE_SIZE;
+    return best || { c: tc, r: tr };
+}
+
+function findPath(startCol, startRow, targetCol, targetRow) {
+    const target = nearestWalkableTarget(targetCol, targetRow);
+    const startKey = `${startCol},${startRow}`;
+    const queue = [{ c: startCol, r: startRow }];
+    const cameFrom = new Map();
+    cameFrom.set(startKey, null);
+
+    while (queue.length) {
+        const node = queue.shift();
+        if (node.c === target.c && node.r === target.r) break;
+
+        for (const dir of ['UP', 'LEFT', 'DOWN', 'RIGHT']) {
+            const nc = node.c + DIRS[dir].dx;
+            const nr = node.r + DIRS[dir].dy;
+            // No hacemos wrap directo en BFS: evita que un enemigo atraviese paredes
+            // al intentar cruzar desde un borde al otro. Los portales se manejan aparte.
+            if (nc < 0 || nc >= COLS || nr < 0 || nr >= ROWS || getMapTile(nc, nr) === 1) continue;
+            const key = `${nc},${nr}`;
+            if (!cameFrom.has(key)) {
+                cameFrom.set(key, { c: node.c, r: node.r });
+                queue.push({ c: nc, r: nr });
+            }
+        }
+    }
+
+    const targetKey = `${target.c},${target.r}`;
+    if (!cameFrom.has(targetKey)) return [];
+
+    const path = [];
+    let current = { c: target.c, r: target.r };
+    while (current && `${current.c},${current.r}` !== startKey) {
+        path.push(current);
+        current = cameFrom.get(`${current.c},${current.r}`);
+    }
+    path.reverse();
+    return path;
+}
+
+function getEnemyPathKey(enemy) {
+    if (enemy === enemyAlpha) return 'alpha';
+    if (enemy === enemyBeta) return 'beta';
+    if (enemy === enemyGamma) return 'gamma';
+    return 'delta';
+}
+
+function getAllPortals() {
+    const portals = [];
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (mapMatrix[r][c] === 3) portals.push({ c, r });
+        }
+    }
+    return portals;
+}
+
+function resetEnemyNavigation(enemy) {
+    enemy._moveTarget = null;
+}
+
+function teleportEnemyIfOnPortal(enemy) {
+    const col = Math.round(enemy.x / TILE_SIZE);
+    const row = Math.round(enemy.y / TILE_SIZE);
+    if (getMapTile(col, row) !== 3) return false;
+
+    const portals = getAllPortals().filter(p => p.c !== col || p.r !== row);
+    if (portals.length === 0) return false;
+
+    // Elegimos el otro portal. Si algún nivel tiene más de dos, usa uno distinto al actual.
+    const dest = portals[0];
+    enemy.x = dest.c * TILE_SIZE;
+    enemy.y = dest.r * TILE_SIZE;
+    enemy._moveTarget = null;
+    return true;
+}
+
+function getEnemyMove(enemy, targetCol, targetRow) {
+    // Los enemigos se mueven de centro de Tile a centro de Tile.
+    // Esto evita que una velocidad decimal (FRIGHTENED / dificultad) haga que
+    // nunca vuelvan a caer exactamente en múltiplos de 32 y atraviesen muros.
+
+    if (!enemy._moveTarget) {
+        const col = Math.round(enemy.x / TILE_SIZE);
+        const row = Math.round(enemy.y / TILE_SIZE);
+
+        // Al iniciar una nueva decisión siempre los alineamos exactamente con la cuadrícula.
+        enemy.x = col * TILE_SIZE;
+        enemy.y = row * TILE_SIZE;
+
+        const path = findPath(col, row, targetCol, targetRow);
+        currentPaths[getEnemyPathKey(enemy)] = path;
+
+        if (path.length === 0) {
+            enemy.currentDir = 'NONE';
+            return;
+        }
+
+        const next = path[0];
+
+        // Protección extra: jamás fijamos como destino un muro.
+        if (getMapTile(next.c, next.r) === 1) {
+            enemy.currentDir = 'NONE';
+            return;
+        }
+
+        const dc = next.c - col;
+        const dr = next.r - row;
+
+        if (dc === 1) enemy.currentDir = 'RIGHT';
+        else if (dc === -1) enemy.currentDir = 'LEFT';
+        else if (dr === 1) enemy.currentDir = 'DOWN';
+        else if (dr === -1) enemy.currentDir = 'UP';
+        else {
+            enemy.currentDir = 'NONE';
+            return;
+        }
+
+        enemy._moveTarget = {
+            c: next.c,
+            r: next.r,
+            x: next.c * TILE_SIZE,
+            y: next.r * TILE_SIZE
+        };
+    }
+
+    const target = enemy._moveTarget;
+    const dx = target.x - enemy.x;
+    const dy = target.y - enemy.y;
+    const step = Math.max(0.01, enemy.speed);
+
+    if (Math.abs(dx) > 0.001) {
+        enemy.x += Math.sign(dx) * Math.min(step, Math.abs(dx));
+    } else if (Math.abs(dy) > 0.001) {
+        enemy.y += Math.sign(dy) * Math.min(step, Math.abs(dy));
+    }
+
+    // Llegó exactamente al siguiente Tile: snap y calcula una nueva ruta en el próximo frame.
+    if (Math.abs(enemy.x - target.x) < 0.001 && Math.abs(enemy.y - target.y) < 0.001) {
+        enemy.x = target.x;
+        enemy.y = target.y;
+        enemy._moveTarget = null;
+        teleportEnemyIfOnPortal(enemy);
+    }
 }
 
 function updateInactiveEnemy(enemy) {
+    enemy.state = 'SPAWN';
     if (enemy.x % TILE_SIZE === 0 && enemy.y % TILE_SIZE === 0) {
         let col = Math.floor(enemy.x / TILE_SIZE), row = Math.floor(enemy.y / TILE_SIZE);
         let nextCol = col + DIRS[enemy.currentDir].dx, nextRow = row + DIRS[enemy.currentDir].dy;
         if (nextRow < 8 || nextRow > 9 || nextCol < 8 || nextCol > 11) enemy.currentDir = OPPOSITE_DIR[enemy.currentDir];
     }
-    enemy.x += DIRS[enemy.currentDir].dx * 1; enemy.y += DIRS[enemy.currentDir].dy * 1;
+    enemy.x += DIRS[enemy.currentDir].dx * 1;
+    enemy.y += DIRS[enemy.currentDir].dy * 1;
 }
 
+function setLivingEnemiesState(newState) {
+    enemiesList.forEach(e => {
+        if (e.active && e.state !== 'RETURN' && e.state !== 'SPAWN') e.state = newState;
+    });
+}
+
+function releaseEnemy(enemy) {
+    enemy.active = true;
+    enemy.state = 'SPAWN';
+    enemy.spawnTimer = 30;
+    enemy.x = 9 * TILE_SIZE;
+    enemy.y = 8 * TILE_SIZE;
+    enemy.currentDir = 'UP';
+    resetEnemyNavigation(enemy);
+}
+
+
 function updateEnemies() {
-    if (!enemyBeta.active && dotsEatenThisLife >= enemyBeta.releaseDots) { enemyBeta.active = true; enemyBeta.x = 9 * TILE_SIZE; enemyBeta.y = 7 * TILE_SIZE; }
-    if (!enemyGamma.active && dotsEatenThisLife >= enemyGamma.releaseDots) { enemyGamma.active = true; enemyGamma.x = 9 * TILE_SIZE; enemyGamma.y = 7 * TILE_SIZE; }
-    if (!enemyDelta.active && dotsEatenThisLife >= enemyDelta.releaseDots) { enemyDelta.active = true; enemyDelta.x = 9 * TILE_SIZE; enemyDelta.y = 7 * TILE_SIZE; }
+    if (!enemyBeta.active && dotsEatenThisLife >= enemyBeta.releaseDots) releaseEnemy(enemyBeta);
+    if (!enemyGamma.active && dotsEatenThisLife >= enemyGamma.releaseDots) releaseEnemy(enemyGamma);
+    if (!enemyDelta.active && dotsEatenThisLife >= enemyDelta.releaseDots) releaseEnemy(enemyDelta);
 
     modeTimer++;
-    if (enemyMode === 'FRIGHTENED' && modeTimer > FRIGHTENED_DURATION) { enemyMode = 'CHASE'; modeTimer = 0; enemiesEatenThisPowerup = 0; } 
-    else if (enemyMode === 'CHASE' && modeTimer > CHASE_DURATION) { enemyMode = 'SCATTER'; modeTimer = 0; } 
-    else if (enemyMode === 'SCATTER' && modeTimer > SCATTER_DURATION) { enemyMode = 'CHASE'; modeTimer = 0; }
-
-    let pCol = Math.floor(player.x / TILE_SIZE), pRow = Math.floor(player.y / TILE_SIZE);
-    let aCol = Math.floor(enemyAlpha.x / TILE_SIZE), aRow = Math.floor(enemyAlpha.y / TILE_SIZE);
-    let currentEnemySpeed = (enemyMode === 'FRIGHTENED') ? 1 : 2;
-
-    if (enemyMode === 'FRIGHTENED') {
-        currentTargets.alpha = { c: aCol - (pCol - aCol), r: aRow - (pRow - aRow) };
-        currentTargets.beta = { c: Math.floor(enemyBeta.x/TILE_SIZE) - (pCol - Math.floor(enemyBeta.x/TILE_SIZE)), r: Math.floor(enemyBeta.y/TILE_SIZE) - (pRow - Math.floor(enemyBeta.y/TILE_SIZE)) };
-        currentTargets.gamma = { c: Math.floor(enemyGamma.x/TILE_SIZE) - (pCol - Math.floor(enemyGamma.x/TILE_SIZE)), r: Math.floor(enemyGamma.y/TILE_SIZE) - (pRow - Math.floor(enemyGamma.y/TILE_SIZE)) };
-        currentTargets.delta = { c: Math.floor(enemyDelta.x/TILE_SIZE) - (pCol - Math.floor(enemyDelta.x/TILE_SIZE)), r: Math.floor(enemyDelta.y/TILE_SIZE) - (pRow - Math.floor(enemyDelta.y/TILE_SIZE)) };
-    } else if (enemyMode === 'SCATTER') {
-        currentTargets.alpha = { c: COLS - 2, r: 1 };         
-        currentTargets.beta = { c: 1, r: 1 };          
-        currentTargets.gamma = { c: COLS - 2, r: ROWS - 2 };  
-        currentTargets.delta = { c: 1, r: ROWS - 2 };  
-    } else {
-        currentTargets.alpha = { c: pCol, r: pRow };
-        let pDir = player.currentDir !== 'NONE' ? player.currentDir : 'UP';
-        currentTargets.beta = { c: pCol + (DIRS[pDir].dx * 4), r: pRow + (DIRS[pDir].dy * 4) };
-        let pivotCol = pCol + (DIRS[pDir].dx * 2), pivotRow = pRow + (DIRS[pDir].dy * 2);
-        currentTargets.gamma = { c: aCol + 2 * (pivotCol - aCol), r: aRow + 2 * (pivotRow - aRow) };
-        
-        let deltaCol = Math.floor(enemyDelta.x / TILE_SIZE);
-        let deltaRow = Math.floor(enemyDelta.y / TILE_SIZE);
-        let deltaDist = getTileDistance(deltaCol, deltaRow, pCol, pRow);
-        currentTargets.delta = deltaDist > 8 ? { c: pCol, r: pRow } : { c: 1, r: ROWS - 2 };
+    if (enemyMode === 'FRIGHTENED' && modeTimer > FRIGHTENED_DURATION) {
+        enemyMode = modeBeforeFrightened;
+        modeTimer = 0;
+        enemiesEatenThisPowerup = 0;
+        setLivingEnemiesState(enemyMode);
+    } else if (enemyMode === 'CHASE' && modeTimer > CHASE_DURATION) {
+        enemyMode = 'SCATTER';
+        modeTimer = 0;
+        setLivingEnemiesState('SCATTER');
+    } else if (enemyMode === 'SCATTER' && modeTimer > SCATTER_DURATION) {
+        enemyMode = 'CHASE';
+        modeTimer = 0;
+        setLivingEnemiesState('CHASE');
     }
-    
-    for (let t in currentTargets) {
-        if (currentTargets[t].c < 0) currentTargets[t].c = COLS + (currentTargets[t].c % COLS);
-        if (currentTargets[t].c >= COLS) currentTargets[t].c = currentTargets[t].c % COLS;
+
+    const pCol = Math.floor(player.x / TILE_SIZE), pRow = Math.floor(player.y / TILE_SIZE);
+    const aCol = Math.floor(enemyAlpha.x / TILE_SIZE), aRow = Math.floor(enemyAlpha.y / TILE_SIZE);
+    const pDir = player.currentDir !== 'NONE' ? player.currentDir : 'UP';
+
+    // Objetivos fijos de SCATTER. Cada agente tiene su propia zona del mapa.
+    const scatterTargets = {
+        alpha: { c: COLS - 2, r: 1 },
+        beta:  { c: 1, r: 1 },
+        gamma: { c: COLS - 2, r: ROWS - 2 },
+        delta: { c: 1, r: ROWS - 2 }
+    };
+
+    // Devuelve la esquina accesible más alejada del jugador. Se usa para huir de verdad,
+    // en lugar de mandar al enemigo a una esquina fija que a veces queda cerca del jugador.
+    function farthestScatterTarget() {
+        const candidates = Object.values(scatterTargets).map(t => nearestWalkableTarget(t.c, t.r));
+        let best = candidates[0];
+        let bestDistance = -1;
+        for (const candidate of candidates) {
+            const d = getTileDistance(candidate.c, candidate.r, pCol, pRow);
+            if (d > bestDistance) {
+                bestDistance = d;
+                best = candidate;
+            }
+        }
+        return { c: best.c, r: best.r };
+    }
+
+    // Las cuatro IA tienen comportamientos claramente distintos.
+    if (enemyMode === 'FRIGHTENED') {
+        for (const e of enemiesList) {
+            if (e.active && e.state !== 'RETURN' && e.state !== 'SPAWN') e.state = 'FRIGHTENED';
+        }
+
+        // En FRIGHTENED todos intentan alejarse del jugador, pero no comparten exactamente
+        // el mismo objetivo: se distribuyen entre esquinas lejanas para no amontonarse.
+        const corners = [scatterTargets.alpha, scatterTargets.beta, scatterTargets.gamma, scatterTargets.delta]
+            .map(t => nearestWalkableTarget(t.c, t.r))
+            .sort((a, b) => getTileDistance(b.c, b.r, pCol, pRow) - getTileDistance(a.c, a.r, pCol, pRow));
+        currentTargets.alpha = { ...corners[0] };
+        currentTargets.beta  = { ...corners[1] };
+        currentTargets.gamma = { ...corners[2] };
+        currentTargets.delta = { ...corners[3] };
+
+    } else if (enemyMode === 'SCATTER') {
+        currentTargets.alpha = { ...scatterTargets.alpha };
+        currentTargets.beta  = { ...scatterTargets.beta };
+        currentTargets.gamma = { ...scatterTargets.gamma };
+        currentTargets.delta = { ...scatterTargets.delta };
+
+    } else {
+        // ALPHA: cazador directo. Siempre busca el Tile actual del jugador.
+        currentTargets.alpha = { c: pCol, r: pRow };
+
+        // BETA: emboscador. Busca una posición varios Tiles delante del jugador.
+        // Si el objetivo cae fuera del mapa o sobre un muro, nearestWalkableTarget lo corrige.
+        const betaLookAhead = Math.min(7, 4 + Math.floor((currentLevel - 1) / 2));
+        currentTargets.beta = nearestWalkableTarget(
+            pCol + DIRS[pDir].dx * betaLookAhead,
+            pRow + DIRS[pDir].dy * betaLookAhead
+        );
+
+        // GAMMA: coordinación. Calcula un punto delante del jugador y lo proyecta usando
+        // simultáneamente la posición de Alpha. Esto hace que intente cerrar rutas.
+        const pivotDistance = Math.min(4, 2 + Math.floor((currentLevel - 1) / 3));
+        const pivotCol = pCol + DIRS[pDir].dx * pivotDistance;
+        const pivotRow = pRow + DIRS[pDir].dy * pivotDistance;
+        currentTargets.gamma = nearestWalkableTarget(
+            pivotCol + (pivotCol - aCol),
+            pivotRow + (pivotRow - aRow)
+        );
+
+        // DELTA: comportamiento condicional. De lejos persigue al jugador; cuando entra
+        // en su radio de seguridad, cambia a la zona accesible más alejada del jugador.
+        const deltaCol = Math.floor(enemyDelta.x / TILE_SIZE);
+        const deltaRow = Math.floor(enemyDelta.y / TILE_SIZE);
+        const deltaDist = getTileDistance(deltaCol, deltaRow, pCol, pRow);
+        const retreatDistance = Math.max(5, 8 - Math.floor((currentLevel - 1) / 2));
+        currentTargets.delta = deltaDist > retreatDistance
+            ? { c: pCol, r: pRow }
+            : farthestScatterTarget();
+    }
+
+    // Nunca hacemos wrap (%) con los objetivos de IA. Un objetivo que sale del mapa se
+    // limita al borde y después se ajusta al Tile caminable más cercano. Esto evita que
+    // Beta/Gamma parezcan teletransportar su objetivo al lado contrario del laberinto.
+    for (const t in currentTargets) {
+        const clampedCol = Math.max(0, Math.min(COLS - 1, currentTargets[t].c));
+        const clampedRow = Math.max(0, Math.min(ROWS - 1, currentTargets[t].r));
+        currentTargets[t] = nearestWalkableTarget(clampedCol, clampedRow);
     }
 
     enemiesList.forEach(e => {
         if (!e.active) { updateInactiveEnemy(e); return; }
-        
-        let targetSpeed = e.isDead ? 4 : currentEnemySpeed;
-        if (e.speed !== targetSpeed) {
-            e.speed = targetSpeed;
-            e.x = Math.round(e.x / e.speed) * e.speed;
-            e.y = Math.round(e.y / e.speed) * e.speed;
+
+        if (e.state === 'RETURN') e.isDead = true;
+        const normalSpeed = e.baseSpeed || 2;
+        const frightenedSpeed = Math.max(1, normalSpeed * 0.58);
+        const targetSpeed = e.state === 'RETURN' ? Math.max(3.5, normalSpeed + 1.4) : (e.state === 'FRIGHTENED' ? frightenedSpeed : normalSpeed);
+        e.speed = targetSpeed;
+
+        let eCol = Math.floor((e.x + TILE_SIZE/2) / TILE_SIZE);
+        let eRow = Math.floor((e.y + TILE_SIZE/2) / TILE_SIZE);
+        const inBase = eCol >= 8 && eCol <= 11 && eRow >= 7 && eRow <= 9;
+
+        if (e.state === 'RETURN' && inBase) {
+            e.state = 'SPAWN';
+            e.isDead = false;
+            e.spawnTimer = 45;
+            e.x = 9 * TILE_SIZE;
+            e.y = 8 * TILE_SIZE;
+            e.currentDir = 'UP';
+            resetEnemyNavigation(e);
         }
 
-        if (e.isDead) {
-            let eCol = Math.floor((e.x + TILE_SIZE/2) / TILE_SIZE);
-            let eRow = Math.floor((e.y + TILE_SIZE/2) / TILE_SIZE);
-            if (eCol >= 8 && eCol <= 11 && eRow >= 7 && eRow <= 9) {
-                e.isDead = false; 
-                e.x = 9 * TILE_SIZE;
-                e.y = 8 * TILE_SIZE;
-                e.speed = currentEnemySpeed; 
+        if (e.state === 'SPAWN') {
+            if (e.spawnTimer > 0) e.spawnTimer--;
+            const exitTarget = { c: 9, r: 6 };
+            getEnemyMove(e, exitTarget.c, exitTarget.r);
+            eCol = Math.floor(e.x / TILE_SIZE);
+            eRow = Math.floor(e.y / TILE_SIZE);
+            if (e.spawnTimer <= 0 && !(eCol >= 8 && eCol <= 11 && eRow >= 7 && eRow <= 9)) {
+                e.state = enemyMode === 'FRIGHTENED' ? modeBeforeFrightened : enemyMode;
             }
+            return;
         }
-        
-        let eCol = Math.floor(e.x / TILE_SIZE);
-        let eRow = Math.floor(e.y / TILE_SIZE);
-        let inBase = (eCol >= 8 && eCol <= 11 && eRow >= 7 && eRow <= 9); 
-        
+
         let target;
-        if (e.isDead) { target = { c: 9, r: 8 }; } 
-        else if (inBase) { target = { c: 9, r: 6 }; } 
-        else {
-            if (e === enemyAlpha) target = currentTargets.alpha;
-            else if (e === enemyBeta) target = currentTargets.beta;
-            else if (e === enemyGamma) target = currentTargets.gamma;
-            else if (e === enemyDelta) target = currentTargets.delta;
-        }
+        if (e.state === 'RETURN') target = { c: 9, r: 8 };
+        else if (e === enemyAlpha) target = currentTargets.alpha;
+        else if (e === enemyBeta) target = currentTargets.beta;
+        else if (e === enemyGamma) target = currentTargets.gamma;
+        else target = currentTargets.delta;
+
         getEnemyMove(e, target.c, target.r);
     });
 }
@@ -469,22 +782,31 @@ function checkCollisions() {
     for (let dot of dots) {
         if (!dot.collected && getDistance(player.x + TILE_SIZE/2, player.y + TILE_SIZE/2, dot.x, dot.y) < 10) {
             dot.collected = true; dotsRemaining--; dotsEatenThisLife++;
-            if (dot.isPowerUp) { 
-                score += 50; enemyMode = 'FRIGHTENED'; modeTimer = 0; enemiesEatenThisPowerup = 0; 
+            if (dot.isPowerUp) {
+                score += 50;
+                if (enemyMode !== 'FRIGHTENED') modeBeforeFrightened = enemyMode;
+                enemyMode = 'FRIGHTENED';
+                modeTimer = 0;
+                enemiesEatenThisPowerup = 0;
+                enemiesList.forEach(e => {
+                    if (e.active && e.state !== 'RETURN' && e.state !== 'SPAWN') e.state = 'FRIGHTENED';
+                });
             } else { score += 10; }
         }
     }
-    if (dotsRemaining <= 0) { submitScoreAuto(); gameState = 'VICTORY'; debugPanel.style.display = 'none'; }
+    if (dotsRemaining <= 0) { gameState = 'VICTORY'; debugPanel.style.display = 'none'; }
 
     for (let enemy of enemiesList) {
         if (enemy.active && !enemy.isDead && getDistance(player.x, player.y, enemy.x, enemy.y) < TILE_SIZE - 8) {
-            if (enemyMode === 'FRIGHTENED') {
+            if (enemy.state === 'FRIGHTENED') {
                 let comboPoints = 200 * Math.pow(2, enemiesEatenThisPowerup);
                 score += comboPoints;
                 floatingTexts.push({ x: enemy.x, y: enemy.y, text: `+${comboPoints}`, timer: 60 });
                 enemiesEatenThisPowerup++;
-                enemy.isDead = true; 
-                enemy.currentDir = OPPOSITE_DIR[enemy.currentDir] !== 'NONE' ? OPPOSITE_DIR[enemy.currentDir] : 'UP'; 
+                enemy.isDead = true;
+                enemy.state = 'RETURN';
+                enemy.currentDir = OPPOSITE_DIR[enemy.currentDir] !== 'NONE' ? OPPOSITE_DIR[enemy.currentDir] : 'UP';
+                resetEnemyNavigation(enemy); 
             } else {
                 gameState = 'DYING'; deathTimer = 60; break; 
             }
@@ -588,13 +910,13 @@ function drawEntity(entity, isPlayer) {
             else col = 6;
             col += animFrame;
         } else {
-            if (entity.isDead) {
-                row = 6; // Fila de ojos
+            if (entity.state === 'RETURN' || entity.isDead) {
+                row = 6; // Fila de ojos / RETURN
                 if (entity.currentDir === 'RIGHT') col = 0;
                 else if (entity.currentDir === 'LEFT') col = 1;
                 else if (entity.currentDir === 'UP') col = 2;
                 else col = 3;
-            } else if (enemyMode === 'FRIGHTENED') {
+            } else if (entity.state === 'FRIGHTENED') {
                 row = 5; // Fila asustados
                 col = (modeTimer > FRIGHTENED_DURATION - 120 && animFrame === 1) ? 2 : animFrame;
             } else {
@@ -647,7 +969,7 @@ function drawEntity(entity, isPlayer) {
                 let eyeOffsetY = entity.currentDir === 'DOWN' ? 2 : entity.currentDir === 'UP' ? -2 : 0;
                 ctx.beginPath(); ctx.arc(-6 + eyeOffset, -4 + eyeOffsetY, 2, 0, Math.PI*2); ctx.arc(6 + eyeOffset, -4 + eyeOffsetY, 2, 0, Math.PI*2); ctx.fill();
             } else {
-                ctx.fillStyle = (enemyMode === 'FRIGHTENED') ? ((modeTimer > FRIGHTENED_DURATION - 120 && animFrame === 1) ? '#ffffff' : '#0033ff') : entity.color;
+                ctx.fillStyle = (entity.state === 'FRIGHTENED') ? ((modeTimer > FRIGHTENED_DURATION - 120 && animFrame === 1) ? '#ffffff' : '#0033ff') : entity.color;
                 
                 // Cuerpo ondulado del fantasma
                 ctx.beginPath();
@@ -667,10 +989,10 @@ function drawEntity(entity, isPlayer) {
                 ctx.fill();
 
                 // Ojos
-                ctx.fillStyle = (enemyMode === 'FRIGHTENED') ? '#ffaaff' : 'white';
+                ctx.fillStyle = (entity.state === 'FRIGHTENED') ? '#ffaaff' : 'white';
                 ctx.beginPath(); ctx.arc(-6, -4, 4, 0, Math.PI*2); ctx.arc(6, -4, 4, 0, Math.PI*2); ctx.fill();
                 
-                ctx.fillStyle = (enemyMode === 'FRIGHTENED') ? '#ff0000' : 'blue';
+                ctx.fillStyle = (entity.state === 'FRIGHTENED') ? '#ff0000' : 'blue';
                 let eyeOffset = entity.currentDir === 'RIGHT' ? 2 : entity.currentDir === 'LEFT' ? -2 : 0;
                 let eyeOffsetY = entity.currentDir === 'DOWN' ? 2 : entity.currentDir === 'UP' ? -2 : 0;
                 ctx.beginPath(); ctx.arc(-6 + eyeOffset, -4 + eyeOffsetY, 2, 0, Math.PI*2); ctx.arc(6 + eyeOffset, -4 + eyeOffsetY, 2, 0, Math.PI*2); ctx.fill();
@@ -713,19 +1035,38 @@ function drawDebug() {
     drawTargetLine(enemyGamma, currentTargets.gamma, '#00aaff'); 
     drawTargetLine(enemyDelta, currentTargets.delta, '#ffaa00'); 
 
+    const drawPath = (path, color) => {
+        if (!path || path.length === 0) return;
+        ctx.beginPath();
+        path.forEach((node, index) => {
+            const x = node.c * TILE_SIZE + TILE_SIZE/2;
+            const y = node.r * TILE_SIZE + TILE_SIZE/2;
+            if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.45;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+    };
+    drawPath(currentPaths.alpha, '#ff0044');
+    drawPath(currentPaths.beta, '#ffb8ff');
+    drawPath(currentPaths.gamma, '#00aaff');
+    drawPath(currentPaths.delta, '#ffaa00');
+
     debugPanel.style.display = 'block';
     debugPanel.innerHTML = `
         <div style="font-weight: bold; margin-bottom: 10px; color: #fff; text-align: center;">MODO DEBUG</div>
         <hr style="border-color: #00ffcc;">
         <br>
         FPS: ${currentFps}<br><br>
+        NIVEL: ${currentLevel}<br><br>
         JUGADOR: [${Math.floor(player.x/TILE_SIZE)}, ${Math.floor(player.y/TILE_SIZE)}]<br><br>
-        MODO IA: ${enemyMode}<br><br>
+        MODO GLOBAL: ${enemyMode}<br><br>
         PUNTOS RES: ${dotsRemaining}<br><br>
-        <span style="color:#ff0044">ALPHA: ${enemyAlpha.active ? 'ACT' : 'INACT'}</span><br><br>
-        <span style="color:#ffb8ff">BETA:  ${enemyBeta.active ? 'ACT' : 'INACT'}</span><br><br>
-        <span style="color:#00aaff">GAMMA: ${enemyGamma.active ? 'ACT' : 'INACT'}</span><br><br>
-        <span style="color:#ffaa00">DELTA: ${enemyDelta.active ? 'ACT' : 'INACT'}</span>
+        <span style="color:#ff0044">ALPHA: ${enemyAlpha.active ? enemyAlpha.state : 'INACT'} | DIST: ${getTileDistance(Math.floor(enemyAlpha.x/TILE_SIZE), Math.floor(enemyAlpha.y/TILE_SIZE), Math.floor(player.x/TILE_SIZE), Math.floor(player.y/TILE_SIZE)).toFixed(1)} tiles</span><br><br>
+        <span style="color:#ffb8ff">BETA: ${enemyBeta.active ? enemyBeta.state : 'INACT'} | DIST: ${getTileDistance(Math.floor(enemyBeta.x/TILE_SIZE), Math.floor(enemyBeta.y/TILE_SIZE), Math.floor(player.x/TILE_SIZE), Math.floor(player.y/TILE_SIZE)).toFixed(1)} tiles</span><br><br>
+        <span style="color:#00aaff">GAMMA: ${enemyGamma.active ? enemyGamma.state : 'INACT'} | DIST: ${getTileDistance(Math.floor(enemyGamma.x/TILE_SIZE), Math.floor(enemyGamma.y/TILE_SIZE), Math.floor(player.x/TILE_SIZE), Math.floor(player.y/TILE_SIZE)).toFixed(1)} tiles</span><br><br>
+        <span style="color:#ffaa00">DELTA: ${enemyDelta.active ? enemyDelta.state : 'INACT'} | DIST: ${getTileDistance(Math.floor(enemyDelta.x/TILE_SIZE), Math.floor(enemyDelta.y/TILE_SIZE), Math.floor(player.x/TILE_SIZE), Math.floor(player.y/TILE_SIZE)).toFixed(1)} tiles</span>
     `;
 }
 
@@ -738,7 +1079,7 @@ function drawUI() {
     }
 
     ctx.fillStyle = '#ff00ff'; ctx.font = 'bold 20px Courier New'; ctx.textAlign = 'left'; ctx.fillText('SCORE: ' + score, 10, 25); 
-    ctx.fillStyle = player.color; ctx.textAlign = 'center'; ctx.fillText('VIDAS: ' + lives, canvas.width / 2, 25); 
+    ctx.fillStyle = player.color; ctx.textAlign = 'center'; ctx.fillText('VIDAS: ' + lives + '   NIVEL: ' + currentLevel, canvas.width / 2, 25); 
     ctx.fillStyle = (enemyMode === 'FRIGHTENED') ? '#ffff00' : '#8888aa'; ctx.textAlign = 'right'; ctx.fillText('RADAR: ' + enemyMode, canvas.width - 10, 25);
 
     if (gameState === 'READY') {
@@ -867,9 +1208,9 @@ function drawMenus() {
         ctx.fillStyle = '#00ffcc'; ctx.font = '18px Courier New'; ctx.fillText('Presiona ENTER para ir al menú', canvas.width / 2, canvas.height / 2 + 70);
     } else if (gameState === 'VICTORY') {
         ctx.fillStyle = 'rgba(0, 255, 204, 0.3)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 50px Courier New'; ctx.textAlign = 'center'; ctx.fillText('VICTORIA', canvas.width / 2, canvas.height / 2 - 10);
-        ctx.fillStyle = '#ffffff'; ctx.font = '20px Courier New'; ctx.fillText('PUNTUACIÓN FINAL: ' + score, canvas.width / 2, canvas.height / 2 + 30);
-        ctx.fillStyle = '#ff00ff'; ctx.font = '18px Courier New'; ctx.fillText('Presiona ENTER para ir al menú', canvas.width / 2, canvas.height / 2 + 70);
+        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 50px Courier New'; ctx.textAlign = 'center'; ctx.fillText('NIVEL ' + currentLevel + ' COMPLETADO', canvas.width / 2, canvas.height / 2 - 10);
+        ctx.fillStyle = '#ffffff'; ctx.font = '20px Courier New'; ctx.fillText('PUNTUACIÓN: ' + score, canvas.width / 2, canvas.height / 2 + 30);
+        ctx.fillStyle = '#ff00ff'; ctx.font = '18px Courier New'; ctx.fillText('ENTER: siguiente nivel (más difícil)', canvas.width / 2, canvas.height / 2 + 70);
     }
 }
 
