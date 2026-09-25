@@ -63,7 +63,43 @@ const BASE_MAP = [
     [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 ];
 
-let mapMatrix = JSON.parse(JSON.stringify(BASE_MAP));
+// 4 mapas principales. A partir del nivel 5 se vuelven a usar,
+// pero la velocidad/tiempos de la IA siguen aumentando con currentLevel.
+function createLevelMap(base, changes) {
+    const copy = JSON.parse(JSON.stringify(base));
+    for (const [row, col, value] of changes) copy[row][col] = value;
+    return copy;
+}
+
+const LEVEL_MAPS = [
+    JSON.parse(JSON.stringify(BASE_MAP)),
+    createLevelMap(BASE_MAP, [
+        [2,2,0],[2,3,0],[2,16,0],[2,17,0],
+        [4,2,0],[4,3,0],[4,16,0],[4,17,0],
+        [14,2,0],[14,3,0],[14,16,0],[14,17,0],
+        [16,2,0],[16,17,0],
+        [3,3,1],[3,16,1]
+    ]),
+    createLevelMap(BASE_MAP, [
+        [2,6,0],[2,7,0],[2,12,0],[2,13,0],
+        [4,6,0],[4,13,0],[14,6,0],[14,13,0],
+        [16,6,0],[16,13,0],
+        [13,4,1],[13,15,1],[15,9,1],[15,10,1]
+    ]),
+    createLevelMap(BASE_MAP, [
+        [2,2,0],[2,3,0],[2,6,0],[2,7,0],[2,12,0],[2,13,0],[2,16,0],[2,17,0],
+        [4,2,0],[4,17,0],[14,2,0],[14,17,0],[16,2,0],[16,17,0],
+        [1,4,1],[1,15,1],[3,6,1],[3,13,1],
+        [13,6,1],[13,13,1],[17,4,1],[17,15,1]
+    ])
+];
+
+function getMapForLevel(level) {
+    const index = (level - 1) % LEVEL_MAPS.length;
+    return JSON.parse(JSON.stringify(LEVEL_MAPS[index]));
+}
+
+let mapMatrix = getMapForLevel(1);
 let gameState = 'TITLE'; 
 let readyTimer = 0;
 let deathTimer = 0;
@@ -75,7 +111,7 @@ let lastFpsUpdate = 0;
 let currentTargets = { alpha: null, beta: null, gamma: null, delta: null };
 
 let mainMenuIndex = 0;
-const mainOptions = ['Jugar (Mapa Base)', 'Niveles Guardados', 'Ver Récords (Top 10)', 'Editor de Niveles', 'Instrucciones', 'Créditos'];
+const mainOptions = ['Jugar Campaña (4 Mapas)', 'Niveles Guardados', 'Ver Récords (Top 10)', 'Editor de Niveles', 'Instrucciones', 'Créditos'];
 let pauseMenuIndex = 0;
 const pauseOptions = ['Continuar', 'Reiniciar', 'Salir al Menú'];
 
@@ -92,7 +128,7 @@ let enemyMode = 'SCATTER';
 let modeBeforeFrightened = 'SCATTER';
 let modeTimer = 0;
 let currentLevel = 1;
-let levelTemplateMap = JSON.parse(JSON.stringify(BASE_MAP));
+let levelTemplateMap = getMapForLevel(1);
 
 // La dificultad se calcula por nivel. Estos valores son la base del nivel 1.
 const BASE_CHASE_DURATION = 60 * 15;
@@ -217,7 +253,7 @@ function resetPositions() {
 
 function fullResetGame() {
     score = 0; lives = 3; scoreSubmitted = false; playerName = ''; currentLevel = 1;
-    levelTemplateMap = JSON.parse(JSON.stringify(mapMatrix));
+    levelTemplateMap = getMapForLevel(currentLevel);
     mapMatrix = JSON.parse(JSON.stringify(levelTemplateMap));
     applyDifficultySettings();
     initDots(); resetPositions();
@@ -225,9 +261,11 @@ function fullResetGame() {
 
 function startNextLevel() {
     currentLevel++;
+    // Cada nivel carga un diseño diferente. Después del nivel 4 los mapas rotan,
+    // mientras la dificultad continúa aumentando normalmente.
+    levelTemplateMap = getMapForLevel(currentLevel);
     mapMatrix = JSON.parse(JSON.stringify(levelTemplateMap));
     applyDifficultySettings();
-    applyLevelMapComplexity();
     initDots();
     resetPositions();
     gameState = 'READY';
@@ -299,7 +337,7 @@ document.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowUp') mainMenuIndex = mainMenuIndex - 1 < 0 ? mainOptions.length - 1 : mainMenuIndex - 1;
         if (e.key === 'ArrowDown') mainMenuIndex = mainMenuIndex + 1 >= mainOptions.length ? 0 : mainMenuIndex + 1;
         if (e.key === 'Enter') {
-            if (mainMenuIndex === 0) { mapMatrix = JSON.parse(JSON.stringify(BASE_MAP)); fullResetGame(); gameState = 'READY'; readyTimer = 120; }
+            if (mainMenuIndex === 0) { mapMatrix = getMapForLevel(1); fullResetGame(); gameState = 'READY'; readyTimer = 120; }
             else if (mainMenuIndex === 1) { fetchLevels(); }
             else if (mainMenuIndex === 2) { fetchScores(); }
             else if (mainMenuIndex === 3) { mapMatrix = JSON.parse(JSON.stringify(BASE_MAP)); gameState = 'EDITOR'; }
@@ -504,6 +542,7 @@ function getAllPortals() {
 
 function resetEnemyNavigation(enemy) {
     enemy._moveTarget = null;
+    enemy._scatterIndex = 0;
 }
 
 function teleportEnemyIfOnPortal(enemy) {
@@ -619,6 +658,60 @@ function releaseEnemy(enemy) {
 }
 
 
+// Rutas de patrulla para SCATTER. En vez de llegar a una esquina y quedarse quietos,
+// cada enemigo recorre varios puntos de su zona continuamente.
+const SCATTER_PATROLS = {
+    alpha: [{c:18,r:1},{c:18,r:3},{c:14,r:3},{c:14,r:1}],
+    beta:  [{c:1,r:1},{c:1,r:3},{c:5,r:3},{c:5,r:1}],
+    gamma: [{c:18,r:17},{c:18,r:15},{c:14,r:15},{c:14,r:17}],
+    delta: [{c:1,r:17},{c:1,r:15},{c:5,r:15},{c:5,r:17}]
+};
+
+function getEnemyNameKey(enemy) {
+    if (enemy === enemyAlpha) return 'alpha';
+    if (enemy === enemyBeta) return 'beta';
+    if (enemy === enemyGamma) return 'gamma';
+    return 'delta';
+}
+
+function getScatterPatrolTarget(enemy) {
+    const key = getEnemyNameKey(enemy);
+    const patrol = SCATTER_PATROLS[key];
+    if (enemy._scatterIndex == null) enemy._scatterIndex = 0;
+
+    let target = nearestWalkableTarget(patrol[enemy._scatterIndex].c, patrol[enemy._scatterIndex].r);
+    const ec = Math.round(enemy.x / TILE_SIZE);
+    const er = Math.round(enemy.y / TILE_SIZE);
+
+    // Al acercarse al punto actual, avanza al siguiente. Así nunca se queda "picado" en la esquina.
+    if (getTileDistance(ec, er, target.c, target.r) <= 1) {
+        enemy._scatterIndex = (enemy._scatterIndex + 1) % patrol.length;
+        target = nearestWalkableTarget(patrol[enemy._scatterIndex].c, patrol[enemy._scatterIndex].r);
+    }
+    return target;
+}
+
+function getDynamicFleeTarget(enemy, pCol, pRow) {
+    const ec = Math.round(enemy.x / TILE_SIZE);
+    const er = Math.round(enemy.y / TILE_SIZE);
+    const candidates = [];
+
+    // Busca un destino caminable que esté lejos del jugador y que obligue al enemigo a seguir moviéndose.
+    for (let r = 1; r < ROWS - 1; r++) {
+        for (let c = 1; c < COLS - 1; c++) {
+            if (getMapTile(c, r) === 1) continue;
+            const fromPlayer = getTileDistance(c, r, pCol, pRow);
+            const fromEnemy = getTileDistance(c, r, ec, er);
+            if (fromEnemy < 3) continue;
+            candidates.push({ c, r, score: fromPlayer * 3 + fromEnemy * 0.25 });
+        }
+    }
+
+    if (candidates.length === 0) return nearestWalkableTarget(1, 1);
+    candidates.sort((a, b) => b.score - a.score);
+    return { c: candidates[0].c, r: candidates[0].r };
+}
+
 function updateEnemies() {
     if (!enemyBeta.active && dotsEatenThisLife >= enemyBeta.releaseDots) releaseEnemy(enemyBeta);
     if (!enemyGamma.active && dotsEatenThisLife >= enemyGamma.releaseDots) releaseEnemy(enemyGamma);
@@ -679,16 +772,22 @@ function updateEnemies() {
         const corners = [scatterTargets.alpha, scatterTargets.beta, scatterTargets.gamma, scatterTargets.delta]
             .map(t => nearestWalkableTarget(t.c, t.r))
             .sort((a, b) => getTileDistance(b.c, b.r, pCol, pRow) - getTileDistance(a.c, a.r, pCol, pRow));
-        currentTargets.alpha = { ...corners[0] };
-        currentTargets.beta  = { ...corners[1] };
-        currentTargets.gamma = { ...corners[2] };
-        currentTargets.delta = { ...corners[3] };
+        // Si alguno alcanza su rincón, vuelve a buscar un destino lejano para seguir huyendo.
+        currentTargets.alpha = getTileDistance(Math.round(enemyAlpha.x/TILE_SIZE), Math.round(enemyAlpha.y/TILE_SIZE), corners[0].c, corners[0].r) <= 1
+            ? getDynamicFleeTarget(enemyAlpha, pCol, pRow) : { ...corners[0] };
+        currentTargets.beta = getTileDistance(Math.round(enemyBeta.x/TILE_SIZE), Math.round(enemyBeta.y/TILE_SIZE), corners[1].c, corners[1].r) <= 1
+            ? getDynamicFleeTarget(enemyBeta, pCol, pRow) : { ...corners[1] };
+        currentTargets.gamma = getTileDistance(Math.round(enemyGamma.x/TILE_SIZE), Math.round(enemyGamma.y/TILE_SIZE), corners[2].c, corners[2].r) <= 1
+            ? getDynamicFleeTarget(enemyGamma, pCol, pRow) : { ...corners[2] };
+        currentTargets.delta = getTileDistance(Math.round(enemyDelta.x/TILE_SIZE), Math.round(enemyDelta.y/TILE_SIZE), corners[3].c, corners[3].r) <= 1
+            ? getDynamicFleeTarget(enemyDelta, pCol, pRow) : { ...corners[3] };
 
     } else if (enemyMode === 'SCATTER') {
-        currentTargets.alpha = { ...scatterTargets.alpha };
-        currentTargets.beta  = { ...scatterTargets.beta };
-        currentTargets.gamma = { ...scatterTargets.gamma };
-        currentTargets.delta = { ...scatterTargets.delta };
+        // Patrullan su propia zona en lugar de quedarse inmóviles al llegar a una esquina.
+        currentTargets.alpha = getScatterPatrolTarget(enemyAlpha);
+        currentTargets.beta  = getScatterPatrolTarget(enemyBeta);
+        currentTargets.gamma = getScatterPatrolTarget(enemyGamma);
+        currentTargets.delta = getScatterPatrolTarget(enemyDelta);
 
     } else {
         // ALPHA: cazador directo. Siempre busca el Tile actual del jugador.
@@ -720,7 +819,7 @@ function updateEnemies() {
         const retreatDistance = Math.max(5, 8 - Math.floor((currentLevel - 1) / 2));
         currentTargets.delta = deltaDist > retreatDistance
             ? { c: pCol, r: pRow }
-            : farthestScatterTarget();
+            : getDynamicFleeTarget(enemyDelta, pCol, pRow);
     }
 
     // Nunca hacemos wrap (%) con los objetivos de IA. Un objetivo que sale del mapa se
