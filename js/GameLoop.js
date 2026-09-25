@@ -40,6 +40,15 @@ const ROWS = 20;
 const spriteSheet = new Image();
 spriteSheet.src = 'img/sprites.png'; // Ruta donde guardarás tu imagen final
 
+// Audio del juego. AudioManager.js debe cargarse antes que GameLoop.js en index.html.
+function playSound(name) {
+    if (window.gameAudio) window.gameAudio.play(name);
+}
+
+function ensureMusic() {
+    if (window.gameAudio) window.gameAudio.startMusic();
+}
+
 const BASE_MAP = [
     [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
     [1,2,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,2,1],
@@ -404,6 +413,7 @@ function resetPositions() {
         // En campaña conservamos el sistema de liberación por puntos.
         enemy.active = isCustomLevel ? true : (enemy === enemyAlpha);
         resetEnemyNavigation(enemy);
+        resetReturnState(enemy);
     });
 
     enemyMode = 'SCATTER';
@@ -519,12 +529,19 @@ canvas.addEventListener('mousedown', (e) => {
 
 document.addEventListener('keydown', (e) => {
     if (e.key === 'F2') { debugMode = !debugMode; e.preventDefault(); return; }
+    if (e.key.toLowerCase() === 'm') {
+        if (window.gameAudio) {
+            const enabled = window.gameAudio.toggle();
+            console.log('Audio: ' + (enabled ? 'ACTIVADO' : 'SILENCIADO'));
+        }
+        return;
+    }
 
-    if (gameState === 'TITLE') { if (e.key === 'Enter') gameState = 'START'; return; }
+    if (gameState === 'TITLE') { if (e.key === 'Enter') { ensureMusic(); playSound('menu'); gameState = 'START'; } return; }
 
     if (gameState === 'START') {
-        if (e.key === 'ArrowUp') mainMenuIndex = mainMenuIndex - 1 < 0 ? mainOptions.length - 1 : mainMenuIndex - 1;
-        if (e.key === 'ArrowDown') mainMenuIndex = mainMenuIndex + 1 >= mainOptions.length ? 0 : mainMenuIndex + 1;
+        if (e.key === 'ArrowUp') { mainMenuIndex = mainMenuIndex - 1 < 0 ? mainOptions.length - 1 : mainMenuIndex - 1; playSound('menu'); }
+        if (e.key === 'ArrowDown') { mainMenuIndex = mainMenuIndex + 1 >= mainOptions.length ? 0 : mainMenuIndex + 1; playSound('menu'); }
         if (e.key === 'Enter') {
             if (mainMenuIndex === 0) { mapMatrix = getMapForLevel(1); fullResetGame(); gameState = 'READY'; readyTimer = 120; }
             else if (mainMenuIndex === 1) { fetchLevels(); }
@@ -616,17 +633,17 @@ document.addEventListener('keydown', (e) => {
     if (gameState === 'VICTORY' && e.key === 'Enter') { if (isCustomLevel) fetchLevels(); else startNextLevel(); return; }
 
     if (gameState === 'PLAYING' || gameState === 'READY') {
-        if (e.key === 'Escape') { gameState = 'PAUSED'; pauseMenuIndex = 0; return; }
+        if (e.key === 'Escape') { gameState = 'PAUSED'; pauseMenuIndex = 0; if (window.gameAudio) window.gameAudio.pauseMusic(); return; }
         if (e.key === 'ArrowUp') player.nextDir = 'UP';
         if (e.key === 'ArrowDown') player.nextDir = 'DOWN';
         if (e.key === 'ArrowLeft') player.nextDir = 'LEFT';
         if (e.key === 'ArrowRight') player.nextDir = 'RIGHT';
     } else if (gameState === 'PAUSED') {
-        if (e.key === 'Escape') { gameState = 'PLAYING'; return; }
+        if (e.key === 'Escape') { gameState = 'PLAYING'; ensureMusic(); return; }
         if (e.key === 'ArrowUp') pauseMenuIndex = pauseMenuIndex - 1 < 0 ? pauseOptions.length - 1 : pauseMenuIndex - 1;
         if (e.key === 'ArrowDown') pauseMenuIndex = pauseMenuIndex + 1 >= pauseOptions.length ? 0 : pauseMenuIndex + 1;
         if (e.key === 'Enter') {
-            if (pauseMenuIndex === 0) gameState = 'PLAYING';
+            if (pauseMenuIndex === 0) { gameState = 'PLAYING'; ensureMusic(); }
             else if (pauseMenuIndex === 1) { fullResetGame(); gameState = 'READY'; readyTimer = 120; }
             else if (pauseMenuIndex === 2) gameState = 'START';
         }
@@ -768,9 +785,21 @@ function getAllPortals() {
 function resetEnemyNavigation(enemy) {
     enemy._moveTarget = null;
     enemy._scatterIndex = 0;
+    enemy._stuckFrames = 0;
+}
+
+function resetReturnState(enemy) {
+    enemy._returnTimer = 0;
+    enemy._portalCooldown = 0;
+    enemy._lastReturnTile = null;
+    enemy._sameReturnTileFrames = 0;
 }
 
 function teleportEnemyIfOnPortal(enemy) {
+    // Evita rebotes infinitos entre portales. El enemigo debe alejarse del portal
+    // antes de poder usar otro. Esto también hace estable el estado RETURN.
+    if ((enemy._portalCooldown || 0) > 0) return false;
+
     const col = Math.round(enemy.x / TILE_SIZE);
     const row = Math.round(enemy.y / TILE_SIZE);
     if (getMapTile(col, row) !== 3) return false;
@@ -783,6 +812,7 @@ function teleportEnemyIfOnPortal(enemy) {
     enemy.x = dest.c * TILE_SIZE;
     enemy.y = dest.r * TILE_SIZE;
     enemy._moveTarget = null;
+    enemy._portalCooldown = 24;
     return true;
 }
 
@@ -1062,27 +1092,46 @@ function updateEnemies() {
     enemiesList.forEach(e => {
         if (!e.active) { updateInactiveEnemy(e); return; }
 
-        if (e.state === 'RETURN') e.isDead = true;
+        if ((e._portalCooldown || 0) > 0) e._portalCooldown--;
+
+        if (e.state === 'RETURN') {
+            e.isDead = true;
+            e._returnTimer = (e._returnTimer || 0) + 1;
+        }
         const normalSpeed = e.baseSpeed || 2;
         const frightenedSpeed = Math.max(1, normalSpeed * 0.58);
         const targetSpeed = e.state === 'RETURN' ? Math.max(3.5, normalSpeed + 1.4) : (e.state === 'FRIGHTENED' ? frightenedSpeed : normalSpeed);
         e.speed = targetSpeed;
 
-        let eCol = Math.floor((e.x + TILE_SIZE/2) / TILE_SIZE);
-        let eRow = Math.floor((e.y + TILE_SIZE/2) / TILE_SIZE);
+        let eCol = Math.round(e.x / TILE_SIZE);
+        let eRow = Math.round(e.y / TILE_SIZE);
         const home = e.homeSpawn || { c: 9, r: 8 };
-        const inBase = useGhostHouse
-            ? (eCol >= 8 && eCol <= 11 && eRow >= 7 && eRow <= 9)
-            : (getTileDistance(eCol, eRow, home.c, home.r) <= 0.5);
+        // En campaña todos regresan primero al centro real de la base. En mapas del
+        // editor regresan al spawn que colocó el diseñador.
+        const returnTarget = useGhostHouse ? nearestWalkableTarget(9, 8) : nearestWalkableTarget(home.c, home.r);
+        const reachedReturnTarget = getTileDistance(eCol, eRow, returnTarget.c, returnTarget.r) <= 0.1;
 
-        if (e.state === 'RETURN' && inBase) {
-            e.state = 'SPAWN';
-            e.isDead = false;
-            e.spawnTimer = 45;
-            e.x = home.c * TILE_SIZE;
-            e.y = home.r * TILE_SIZE;
-            e.currentDir = 'UP';
-            resetEnemyNavigation(e);
+        if (e.state === 'RETURN') {
+            const tileKey = `${eCol},${eRow}`;
+            if (e._lastReturnTile === tileKey) e._sameReturnTileFrames = (e._sameReturnTileFrames || 0) + 1;
+            else {
+                e._lastReturnTile = tileKey;
+                e._sameReturnTileFrames = 0;
+            }
+
+            // Si ya llegó, reaparece. El segundo caso es solo una protección de seguridad:
+            // si por un mapa personalizado imposible queda bloqueado demasiado tiempo,
+            // lo devuelve a su spawn en lugar de dejar unos ojos congelados para siempre.
+            if (reachedReturnTarget || (e._returnTimer || 0) > 60 * 8 || (e._sameReturnTileFrames || 0) > 60 * 3) {
+                e.state = 'SPAWN';
+                e.isDead = false;
+                e.spawnTimer = 45;
+                e.x = home.c * TILE_SIZE;
+                e.y = home.r * TILE_SIZE;
+                e.currentDir = 'UP';
+                resetEnemyNavigation(e);
+                resetReturnState(e);
+            }
         }
 
         if (e.state === 'SPAWN') {
@@ -1106,7 +1155,7 @@ function updateEnemies() {
         }
 
         let target;
-        if (e.state === 'RETURN') target = home;
+        if (e.state === 'RETURN') target = returnTarget;
         else if (e === enemyAlpha) target = currentTargets.alpha;
         else if (e === enemyBeta) target = currentTargets.beta;
         else if (e === enemyGamma) target = currentTargets.gamma;
@@ -1121,6 +1170,7 @@ function checkCollisions() {
         if (!dot.collected && getDistance(player.x + TILE_SIZE/2, player.y + TILE_SIZE/2, dot.x, dot.y) < 10) {
             dot.collected = true; dotsRemaining--; dotsEatenThisLife++;
             if (dot.isPowerUp) {
+                playSound('powerup');
                 score += 50;
                 if (enemyMode !== 'FRIGHTENED') modeBeforeFrightened = enemyMode;
                 enemyMode = 'FRIGHTENED';
@@ -1129,10 +1179,10 @@ function checkCollisions() {
                 enemiesList.forEach(e => {
                     if (e.active && e.state !== 'RETURN' && e.state !== 'SPAWN') e.state = 'FRIGHTENED';
                 });
-            } else { score += 10; }
+            } else { score += 10; playSound('dot'); }
         }
     }
-    if (dotsRemaining <= 0) { gameState = 'VICTORY'; debugPanel.style.display = 'none'; }
+    if (dotsRemaining <= 0 && gameState !== 'VICTORY') { playSound('victory'); gameState = 'VICTORY'; debugPanel.style.display = 'none'; }
 
     for (let enemy of enemiesList) {
         if (enemy.active && !enemy.isDead && getDistance(player.x, player.y, enemy.x, enemy.y) < TILE_SIZE - 8) {
@@ -1141,11 +1191,14 @@ function checkCollisions() {
                 score += comboPoints;
                 floatingTexts.push({ x: enemy.x, y: enemy.y, text: `+${comboPoints}`, timer: 60 });
                 enemiesEatenThisPowerup++;
+                playSound('enemy');
                 enemy.isDead = true;
                 enemy.state = 'RETURN';
+                resetReturnState(enemy);
                 enemy.currentDir = OPPOSITE_DIR[enemy.currentDir] !== 'NONE' ? OPPOSITE_DIR[enemy.currentDir] : 'UP';
                 resetEnemyNavigation(enemy); 
             } else {
+                playSound('hurt');
                 gameState = 'DYING'; deathTimer = 60; break; 
             }
         }
@@ -1164,7 +1217,7 @@ function checkCollisions() {
             }
             if (portals.length > 0) {
                 let dest = portals[Math.floor(Math.random() * portals.length)];
-                player.x = dest.c * TILE_SIZE; player.y = dest.r * TILE_SIZE; portalCooldown = 60; 
+                player.x = dest.c * TILE_SIZE; player.y = dest.r * TILE_SIZE; portalCooldown = 60; playSound('portal'); 
             }
         }
     }
