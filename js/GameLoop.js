@@ -57,7 +57,8 @@ const BASE_MAP = [
 
 let mapMatrix = JSON.parse(JSON.stringify(BASE_MAP));
 
-let gameState = 'START'; 
+// NUEVO: Estado inicial para la Pantalla de Inicio
+let gameState = 'TITLE'; 
 let readyTimer = 0;
 let deathTimer = 0;
 
@@ -68,7 +69,8 @@ let lastFpsUpdate = 0;
 let currentTargets = { alpha: null, beta: null, gamma: null, delta: null };
 
 let mainMenuIndex = 0;
-const mainOptions = ['Jugar (Mapa Base)', 'Niveles Guardados', 'Ver Récords (Top 10)', 'Editor de Niveles'];
+// NUEVO: Opciones añadidas al menú
+const mainOptions = ['Jugar (Mapa Base)', 'Niveles Guardados', 'Ver Récords (Top 10)', 'Editor de Niveles', 'Instrucciones', 'Créditos'];
 let pauseMenuIndex = 0;
 const pauseOptions = ['Continuar', 'Reiniciar', 'Salir al Menú'];
 
@@ -204,6 +206,13 @@ document.addEventListener('keydown', (e) => {
         return;
     }
 
+    if (gameState === 'TITLE') {
+        if (e.key === 'Enter') {
+            gameState = 'START';
+        }
+        return;
+    }
+
     if (gameState === 'START') {
         if (e.key === 'ArrowUp') mainMenuIndex = mainMenuIndex - 1 < 0 ? mainOptions.length - 1 : mainMenuIndex - 1;
         if (e.key === 'ArrowDown') mainMenuIndex = mainMenuIndex + 1 >= mainOptions.length ? 0 : mainMenuIndex + 1;
@@ -218,7 +227,14 @@ document.addEventListener('keydown', (e) => {
                 mapMatrix = JSON.parse(JSON.stringify(BASE_MAP)); 
                 gameState = 'EDITOR'; 
             }
+            else if (mainMenuIndex === 4) { gameState = 'MENU_INSTRUCTIONS'; }
+            else if (mainMenuIndex === 5) { gameState = 'MENU_CREDITS'; }
         }
+        return;
+    }
+
+    if (gameState === 'MENU_INSTRUCTIONS' || gameState === 'MENU_CREDITS') {
+        if (e.key === 'Escape' || e.key === 'Enter') { gameState = 'START'; }
         return;
     }
 
@@ -440,7 +456,6 @@ function updateEnemies() {
             return;
         }
         
-        // CÓDIGO CORREGIDO: Redondeo matemático para que no pierdan su alineación con la cuadrícula
         let targetSpeed = e.isDead ? 4 : currentEnemySpeed;
         if (e.speed !== targetSpeed) {
             e.speed = targetSpeed;
@@ -455,7 +470,7 @@ function updateEnemies() {
                 e.isDead = false; 
                 e.x = 9 * TILE_SIZE;
                 e.y = 8 * TILE_SIZE;
-                e.speed = currentEnemySpeed; // Se reinicia su velocidad al revivir
+                e.speed = currentEnemySpeed; 
             }
         }
         
@@ -689,15 +704,65 @@ function drawUI() {
 }
 
 function drawMenus() {
-    if (gameState === 'START') {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 40px Courier New'; ctx.textAlign = 'center'; ctx.fillText('CYBER MAZE', canvas.width / 2, canvas.height / 2 - 60);
+    if (gameState === 'TITLE') {
+        ctx.fillStyle = 'rgba(0, 0, 0, 1)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 60px Courier New'; ctx.textAlign = 'center'; 
+        ctx.fillText('CYBER MAZE', canvas.width / 2, canvas.height / 2 - 40);
+        ctx.fillStyle = '#ff00ff'; ctx.font = '20px Courier New'; 
+        ctx.fillText('PURSUIT PROTOCOL', canvas.width / 2, canvas.height / 2);
+
+        if (Math.floor(Date.now() / 500) % 2 === 0) {
+            ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Courier New';
+            ctx.fillText('- PRESIONA ENTER PARA INICIAR -', canvas.width / 2, canvas.height / 2 + 80);
+        }
+    } else if (gameState === 'START') {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.9)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 40px Courier New'; ctx.textAlign = 'center'; ctx.fillText('MENÚ PRINCIPAL', canvas.width / 2, 80);
         
         ctx.font = 'bold 22px Courier New';
         for (let i = 0; i < mainOptions.length; i++) {
             ctx.fillStyle = i === mainMenuIndex ? '#ff00ff' : '#ffffff';
-            ctx.fillText((i === mainMenuIndex ? '> ' : '') + mainOptions[i] + (i === mainMenuIndex ? ' <' : ''), canvas.width / 2, canvas.height / 2 + (i * 35));
+            ctx.fillText((i === mainMenuIndex ? '> ' : '') + mainOptions[i] + (i === mainMenuIndex ? ' <' : ''), canvas.width / 2, 150 + (i * 45));
         }
+    } else if (gameState === 'MENU_INSTRUCTIONS') {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.95)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 35px Courier New'; ctx.textAlign = 'center'; ctx.fillText('INSTRUCCIONES', canvas.width / 2, 70);
+        
+        ctx.fillStyle = '#ffffff'; ctx.font = '18px Courier New'; ctx.textAlign = 'left';
+        ctx.fillText('• Usa las FLECHAS DIRECCIONALES para moverte.', 40, 130);
+        ctx.fillText('• Come todos los puntos blancos para ganar.', 40, 170);
+        ctx.fillText('• Evita a los enemigos; si te tocan, pierdes vida.', 40, 210);
+        
+        ctx.fillStyle = '#ffff00';
+        ctx.fillText('• POWER-UPS (Puntos grandes amarillos):', 40, 260);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('  Te permiten comerte a los enemigos temporalmente.', 40, 290);
+        ctx.fillText('  ¡Encadena combos para multiplicar tus puntos!', 40, 320);
+
+        ctx.fillStyle = '#00ffff';
+        ctx.fillText('• PORTALES (Casillas celestes):', 40, 370);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('  Atraviésalos para teletransportarte por el mapa.', 40, 400);
+
+        ctx.fillStyle = '#ff00ff'; ctx.font = 'bold 16px Courier New'; ctx.textAlign = 'center';
+        ctx.fillText('Presiona ESC o ENTER para volver', canvas.width / 2, canvas.height - 40);
+    } else if (gameState === 'MENU_CREDITS') {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.95)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 35px Courier New'; ctx.textAlign = 'center'; ctx.fillText('CRÉDITOS', canvas.width / 2, 100);
+        
+        ctx.fillStyle = '#ffffff'; ctx.font = '22px Courier New';
+        ctx.fillText('DESARROLLADO POR:', canvas.width / 2, 200);
+        
+        ctx.fillStyle = '#ff00ff'; ctx.font = 'bold 26px Courier New';
+        ctx.fillText('Iris Mairet Lucho Hernandez', canvas.width / 2, 260);
+        ctx.fillText('Pamela Ameli Aguirre Sanchez', canvas.width / 2, 310);
+        
+        ctx.fillStyle = '#8888aa'; ctx.font = '16px Courier New';
+        ctx.fillText('Proyecto 4: Cyber Maze - Pursuit Protocol', canvas.width / 2, 400);
+
+        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 16px Courier New';
+        ctx.fillText('Presiona ESC o ENTER para volver', canvas.width / 2, canvas.height - 40);
     } else if (gameState === 'MENU_LEVELS') {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.9)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 30px Courier New'; ctx.textAlign = 'center'; ctx.fillText('NIVELES GUARDADOS', canvas.width / 2, 70);
@@ -774,9 +839,12 @@ function gameLoop(timestamp) {
     }
 
     ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    if (gameState !== 'EDITOR') update(); 
-    drawMap(); 
-    drawDots();
+    if (gameState !== 'EDITOR' && gameState !== 'TITLE' && gameState !== 'MENU_INSTRUCTIONS' && gameState !== 'MENU_CREDITS') update(); 
+    
+    if (gameState !== 'TITLE' && gameState !== 'MENU_INSTRUCTIONS' && gameState !== 'MENU_CREDITS') {
+        drawMap(); 
+        drawDots();
+    }
     
     if (gameState === 'READY' || gameState === 'PLAYING' || gameState === 'PAUSED' || gameState === 'DYING') { 
         drawEntity(player, true); 
@@ -798,7 +866,8 @@ function gameLoop(timestamp) {
     
     drawDebug();
 
-    if (gameState !== 'START' && gameState !== 'MENU_SCORES' && gameState !== 'MENU_LEVELS') drawUI(); 
+    if (gameState !== 'START' && gameState !== 'MENU_SCORES' && gameState !== 'MENU_LEVELS' && gameState !== 'TITLE' && gameState !== 'MENU_INSTRUCTIONS' && gameState !== 'MENU_CREDITS') drawUI(); 
+    
     drawMenus(); 
     
     requestAnimationFrame(gameLoop);
