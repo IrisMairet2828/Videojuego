@@ -120,7 +120,7 @@ let lastFpsUpdate = 0;
 let currentTargets = { alpha: null, beta: null, gamma: null, delta: null };
 
 let mainMenuIndex = 0;
-const mainOptions = ['Jugar Campaña (4 Mapas)', 'Niveles Guardados', 'Ver Récords (Top 10)', 'Editor de Niveles', 'Instrucciones', 'Créditos'];
+const mainOptions = ['Jugar', 'Niveles Guardados', 'Ver Récords', 'Editor de Niveles', 'Instrucciones', 'Créditos'];
 let pauseMenuIndex = 0;
 const pauseOptions = ['Continuar', 'Reiniciar', 'Salir al Menú'];
 
@@ -1527,14 +1527,11 @@ function drawHearts(x, y, count) {
     ctx.restore();
 }
 
-function drawSectionTitle(textTitle, x, y, color = '#7ef9ff', subColor = '#ffd6f4') {
+function drawSectionTitle(textTitle, x, y, color = '#7ef9ff') {
     ctx.textAlign = 'center';
     ctx.fillStyle = color;
     ctx.font = 'bold 34px Courier New';
     ctx.fillText(textTitle, x, y);
-    ctx.fillStyle = subColor;
-    ctx.font = '16px Courier New';
-    ctx.fillText('kawaii cyber edition', x, y + 24);
 }
 
 function drawMenuOption(textOption, x, y, isSelected) {
@@ -1680,13 +1677,12 @@ function drawMenus() {
         drawRoundedPanel(70, 110, canvas.width - 140, 260, 'rgba(18, 26, 52, 0.88)', '#7ef9ff', 22);
         drawSectionTitle('CYBER MAZE', canvas.width / 2, 190);
         ctx.fillStyle = '#ff9bd0';
-        ctx.font = 'bold 22px Courier New';
+        ctx.font = 'bold 20px Courier New';
         ctx.textAlign = 'center';
-        ctx.fillText('PURSUIT PROTOCOL', canvas.width / 2, 235);
+        ctx.fillText('¡Junta todos los fragmentos y escapa!', canvas.width / 2, 250);
         ctx.fillStyle = '#dceeff';
         ctx.font = '17px Courier New';
-        ctx.fillText('Recoge todos los fragmentos, esquiva a las IAs', canvas.width / 2, 286);
-        ctx.fillText('y domina el laberinto con estilo pastel ✦', canvas.width / 2, 314);
+        ctx.fillText('Muévete por el laberinto y evita que te atrapen.', canvas.width / 2, 300);
 
         if (Math.floor(Date.now() / 500) % 2 === 0) {
             drawRoundedPanel(canvas.width / 2 - 165, 400, 330, 48, 'rgba(255, 122, 184, 0.18)', '#ff9bd0', 16, 'rgba(255, 155, 208, 0.30)');
@@ -1695,7 +1691,7 @@ function drawMenus() {
             ctx.fillText('PRESIONA ENTER PARA INICIAR', canvas.width / 2, 430);
         }
 
-        drawFooterHint('F2 debug • M audio • Proyecto 4 / Cyber Maze');
+        drawFooterHint('ENTER iniciar • M audio • F2 debug');
     } else if (gameState === 'START') {
         drawRoundedPanel(92, 60, canvas.width - 184, canvas.height - 120, 'rgba(12, 18, 36, 0.90)', '#7ef9ff', 22);
         drawSectionTitle('MENÚ PRINCIPAL', canvas.width / 2, 106);
@@ -1710,9 +1706,6 @@ function drawMenus() {
         ctx.fillStyle = '#7ef9ff';
         ctx.font = 'bold 32px Courier New';
         ctx.fillText('INSTRUCCIONES', canvas.width / 2, 94);
-        ctx.fillStyle = '#ffd6f4';
-        ctx.font = '14px Courier New';
-        ctx.fillText('kawaii cyber edition', canvas.width / 2, 118);
 
         ctx.textAlign = 'left';
         ctx.font = '15px Courier New';
@@ -1747,8 +1740,8 @@ function drawMenus() {
         ctx.fillText('Pamela Ameli Aguirre Sanchez', canvas.width / 2, 318);
         ctx.fillStyle = '#dceeff';
         ctx.font = '18px Courier New';
-        ctx.fillText('Proyecto 4 • Cyber Maze: Pursuit Protocol', canvas.width / 2, 412);
-        ctx.fillText('Sprites kawaii + editor + IA + Node.js', canvas.width / 2, 446);
+        ctx.fillText('Kawaii Cyber Maze', canvas.width / 2, 412);
+        ctx.fillText('Desarrollado con tecnología web', canvas.width / 2, 446);
         drawFooterHint('ESC o ENTER para volver');
     } else if (gameState === 'MENU_LEVELS') {
         drawRoundedPanel(68, 48, canvas.width - 136, canvas.height - 96, 'rgba(12, 18, 36, 0.92)', '#7ef9ff', 22);
@@ -1808,9 +1801,6 @@ function drawMenus() {
         ctx.fillStyle = '#7ef9ff';
         ctx.font = 'bold 30px Courier New';
         ctx.fillText('PAUSA', canvas.width / 2, canvas.height / 2 - 74);
-        ctx.fillStyle = '#ffd6f4';
-        ctx.font = '13px Courier New';
-        ctx.fillText('kawaii cyber edition', canvas.width / 2, canvas.height / 2 - 50);
         for (let i = 0; i < pauseOptions.length; i++) {
             const y = canvas.height / 2 + 5 + i * 52;
             if (i === pauseMenuIndex) {
