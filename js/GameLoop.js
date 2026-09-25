@@ -1471,155 +1471,382 @@ function drawDebug() {
     `;
 }
 
-function drawUI() { 
-    if (gameState === 'EDITOR') {
-        const tool = EDITOR_TOOLS.find(t => t.value === editorTool);
-        const info = scanLevelMarkers(mapMatrix);
 
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.86)'; ctx.fillRect(0, 0, canvas.width, 62);
-        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 13px Courier New'; ctx.textAlign = 'left';
-        ctx.fillText('EDITOR | 1 Suelo  2 Muro  3 Objeto  4 Portal  5 Jugador  6 Enemigo', 8, 17);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(`Herramienta: ${tool.name} | Enemigos: ${info.enemySpawns.length}/4 | S Guardar | ESC Salir`, 8, 36);
-        ctx.fillStyle = editorMessage.toLowerCase().includes('falta') || editorMessage.toLowerCase().includes('debes') || editorMessage.toLowerCase().includes('error')
-            ? '#ff6688' : '#ffff66';
-        ctx.fillText(editorMessage.slice(0, 82), 8, 54);
-        return;
+function drawRoundedPanel(x, y, w, h, fill = 'rgba(12, 16, 36, 0.88)', stroke = '#7ef9ff', radius = 18, glow = 'rgba(126, 249, 255, 0.24)') {
+    ctx.save();
+    ctx.shadowColor = glow;
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + w - radius, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+    ctx.lineTo(x + w, y + h - radius);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+    ctx.lineTo(x + radius, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+}
+
+function drawMiniStar(x, y, color = '#ffe3f5', size = 6) {
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x, y - size);
+    ctx.lineTo(x + size * 0.35, y - size * 0.35);
+    ctx.lineTo(x + size, y);
+    ctx.lineTo(x + size * 0.35, y + size * 0.35);
+    ctx.lineTo(x, y + size);
+    ctx.lineTo(x - size * 0.35, y + size * 0.35);
+    ctx.lineTo(x - size, y);
+    ctx.lineTo(x - size * 0.35, y - size * 0.35);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+}
+
+function drawHearts(x, y, count) {
+    ctx.save();
+    for (let i = 0; i < count; i++) {
+        const hx = x + i * 24;
+        ctx.fillStyle = '#ff7ab8';
+        ctx.beginPath();
+        ctx.arc(hx - 5, y, 5, 0, Math.PI * 2);
+        ctx.arc(hx + 5, y, 5, 0, Math.PI * 2);
+        ctx.lineTo(hx, y + 12);
+        ctx.closePath();
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
+function drawSectionTitle(textTitle, x, y, color = '#7ef9ff', subColor = '#ffd6f4') {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = color;
+    ctx.font = 'bold 34px Courier New';
+    ctx.fillText(textTitle, x, y);
+    ctx.fillStyle = subColor;
+    ctx.font = '16px Courier New';
+    ctx.fillText('kawaii cyber edition', x, y + 24);
+}
+
+function drawMenuOption(textOption, x, y, isSelected) {
+    if (isSelected) {
+        drawRoundedPanel(x - 235, y - 21, 470, 34, 'rgba(255, 122, 184, 0.18)', '#ff8fd0', 14, 'rgba(255, 143, 208, 0.35)');
+        ctx.fillStyle = '#fff4ff';
+    } else {
+        ctx.fillStyle = '#dceeff';
+    }
+    ctx.textAlign = 'center';
+    ctx.font = isSelected ? 'bold 22px Courier New' : '20px Courier New';
+    ctx.fillText((isSelected ? '› ' : '') + textOption + (isSelected ? ' ‹' : ''), x, y + 2);
+}
+
+function drawFooterHint(textHint, y = canvas.height - 26) {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffe3f5';
+    ctx.font = '14px Courier New';
+    ctx.fillText(textHint, canvas.width / 2, y);
+}
+
+
+function ensureExternalGameBars() {
+    let host = canvas.parentNode;
+
+    let hud = document.getElementById('externalGameHud');
+    if (!hud) {
+        hud = document.createElement('div');
+        hud.id = 'externalGameHud';
+        hud.style.width = canvas.width + 'px';
+        hud.style.boxSizing = 'border-box';
+        hud.style.margin = '0 auto 10px auto';
+        hud.style.padding = '10px 16px';
+        hud.style.border = '2px solid #7ef9ff';
+        hud.style.borderRadius = '16px';
+        hud.style.background = 'rgba(12,18,36,0.96)';
+        hud.style.boxShadow = '0 0 18px rgba(126,249,255,.22)';
+        hud.style.fontFamily = 'Courier New';
+        hud.style.color = '#ffffff';
+        hud.style.display = 'none';
+        hud.style.textAlign = 'center';
+        host.parentNode.insertBefore(hud, host);
     }
 
-    ctx.fillStyle = '#ff00ff'; ctx.font = 'bold 20px Courier New'; ctx.textAlign = 'left'; ctx.fillText('SCORE: ' + score, 10, 25); 
-    ctx.fillStyle = player.color; ctx.textAlign = 'center'; ctx.fillText('VIDAS: ' + lives + '   NIVEL: ' + currentLevel, canvas.width / 2, 25); 
-    ctx.fillStyle = (enemyMode === 'FRIGHTENED') ? '#ffff00' : '#8888aa'; ctx.textAlign = 'right'; ctx.fillText('RADAR: ' + enemyMode, canvas.width - 10, 25);
+    let editor = document.getElementById('externalEditorBar');
+    if (!editor) {
+        editor = document.createElement('div');
+        editor.id = 'externalEditorBar';
+        editor.style.width = canvas.width + 'px';
+        editor.style.boxSizing = 'border-box';
+        editor.style.margin = '0 auto 10px auto';
+        editor.style.padding = '10px 14px';
+        editor.style.border = '2px solid #7ef9ff';
+        editor.style.borderRadius = '16px';
+        editor.style.background = 'rgba(12,18,36,0.96)';
+        editor.style.boxShadow = '0 0 18px rgba(126,249,255,.22)';
+        editor.style.fontFamily = 'Courier New';
+        editor.style.color = '#ffffff';
+        editor.style.display = 'none';
+        editor.style.lineHeight = '1.45';
+        host.parentNode.insertBefore(editor, host);
+    }
+    return { hud, editor };
+}
+
+function updateExternalGameBars() {
+    const bars = ensureExternalGameBars();
+    const showHud = ['READY','PLAYING','PAUSED','DYING','VICTORY'].includes(gameState);
+    const showEditor = gameState === 'EDITOR';
+
+    bars.hud.style.display = showHud ? 'block' : 'none';
+    bars.editor.style.display = showEditor ? 'block' : 'none';
+
+    if (showHud) {
+        const hearts = '♥'.repeat(Math.max(0, lives));
+        const muted = (window.gameAudio && window.gameAudio.muted) ? 'OFF' : 'ON';
+        bars.hud.innerHTML = `
+            <div style="display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;align-items:center">
+                <span style="color:#ff9bd0;font-weight:bold">SCORE ${score}</span>
+                <span style="color:#dff6ff;font-weight:bold">NIVEL ${currentLevel}</span>
+                <span style="color:#fff6a3;font-weight:bold">FRAGMENTOS ${dotsRemaining}</span>
+                <span style="color:#ff9bd0;font-weight:bold">VIDAS ${hearts || '0'}</span>
+                <span style="color:${enemyMode === 'FRIGHTENED' ? '#fff28c' : '#b8d8ff'};font-weight:bold">ESTADO ${enemyMode}</span>
+            </div>
+            <div style="margin-top:6px;color:#cdd9ff;font-size:12px">P: pausa &nbsp;•&nbsp; F2: debug &nbsp;•&nbsp; M: audio ${muted}</div>
+        `;
+    }
+
+    if (showEditor) {
+        const tool = EDITOR_TOOLS.find(t => t.value === editorTool);
+        const info = scanLevelMarkers(mapMatrix);
+        const msgColor = editorMessage.toLowerCase().includes('falta') || editorMessage.toLowerCase().includes('debes') || editorMessage.toLowerCase().includes('error') ? '#ff86af' : '#fff28c';
+        bars.editor.innerHTML = `
+            <div style="color:#7ef9ff;font-weight:bold">EDITOR DE NIVELES</div>
+            <div style="font-size:13px;margin-top:4px">1 Suelo &nbsp; 2 Muro &nbsp; 3 Objeto &nbsp; 4 Portal &nbsp; 5 Jugador &nbsp; 6 Enemigo</div>
+            <div style="font-size:13px;margin-top:3px">Herramienta: <b>${tool.name}</b> &nbsp;|&nbsp; Enemigos: ${info.enemySpawns.length}/4 &nbsp;|&nbsp; S Guardar &nbsp;|&nbsp; ESC Salir</div>
+            <div style="font-size:12px;margin-top:3px;color:${msgColor}">${editorMessage || 'Selecciona una herramienta con las teclas 1–6.'}</div>
+        `;
+    }
+}
+
+function wrapCanvasText(text, x, y, maxWidth, lineHeight) {
+    const words = text.split(' ');
+    let line = '';
+    let yy = y;
+    for (let n = 0; n < words.length; n++) {
+        const testLine = line + words[n] + ' ';
+        if (ctx.measureText(testLine).width > maxWidth && n > 0) {
+            ctx.fillText(line.trim(), x, yy);
+            line = words[n] + ' ';
+            yy += lineHeight;
+        } else {
+            line = testLine;
+        }
+    }
+    if (line.trim()) ctx.fillText(line.trim(), x, yy);
+    return yy;
+}
+
+
+function drawUI() {
+    updateExternalGameBars();
 
     if (gameState === 'READY') {
-        ctx.fillStyle = '#ffff00'; ctx.font = 'bold 35px Courier New'; ctx.textAlign = 'center';
-        ctx.fillText('¡READY!', canvas.width / 2, 11.5 * TILE_SIZE);
+        drawRoundedPanel(canvas.width / 2 - 105, canvas.height / 2 - 34, 210, 68, 'rgba(255,122,184,0.16)', '#ff9bd0', 18, 'rgba(255,155,208,0.30)');
+        ctx.fillStyle = '#fff28c';
+        ctx.font = 'bold 28px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText('¡READY!', canvas.width / 2, canvas.height / 2 + 10);
     }
 }
 
 function drawMenus() {
     if (gameState === 'TITLE') {
-        ctx.fillStyle = 'rgba(0, 0, 0, 1)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 60px Courier New'; ctx.textAlign = 'center'; 
-        ctx.fillText('CYBER MAZE', canvas.width / 2, canvas.height / 2 - 40);
-        ctx.fillStyle = '#ff00ff'; ctx.font = '20px Courier New'; 
-        ctx.fillText('PURSUIT PROTOCOL', canvas.width / 2, canvas.height / 2);
+        ctx.fillStyle = '#080b18';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        for (let i = 0; i < 10; i++) {
+            drawMiniStar(45 + i * 58, 70 + (i % 2) * 18, i % 3 === 0 ? '#7ef9ff' : '#ffd6f4', 5);
+            drawMiniStar(30 + i * 60, 520 + (i % 2) * 14, i % 3 === 1 ? '#fff28c' : '#7ef9ff', 4);
+        }
+
+        drawRoundedPanel(70, 110, canvas.width - 140, 260, 'rgba(18, 26, 52, 0.88)', '#7ef9ff', 22);
+        drawSectionTitle('CYBER MAZE', canvas.width / 2, 190);
+        ctx.fillStyle = '#ff9bd0';
+        ctx.font = 'bold 22px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText('PURSUIT PROTOCOL', canvas.width / 2, 235);
+        ctx.fillStyle = '#dceeff';
+        ctx.font = '17px Courier New';
+        ctx.fillText('Recoge todos los fragmentos, esquiva a las IAs', canvas.width / 2, 286);
+        ctx.fillText('y domina el laberinto con estilo pastel ✦', canvas.width / 2, 314);
 
         if (Math.floor(Date.now() / 500) % 2 === 0) {
-            ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Courier New';
-            ctx.fillText('- PRESIONA ENTER PARA INICIAR -', canvas.width / 2, canvas.height / 2 + 80);
+            drawRoundedPanel(canvas.width / 2 - 165, 400, 330, 48, 'rgba(255, 122, 184, 0.18)', '#ff9bd0', 16, 'rgba(255, 155, 208, 0.30)');
+            ctx.fillStyle = '#fff4ff';
+            ctx.font = 'bold 20px Courier New';
+            ctx.fillText('PRESIONA ENTER PARA INICIAR', canvas.width / 2, 430);
         }
+
+        drawFooterHint('F2 debug • M audio • Proyecto 4 / Cyber Maze');
     } else if (gameState === 'START') {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.9)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 40px Courier New'; ctx.textAlign = 'center'; ctx.fillText('MENÚ PRINCIPAL', canvas.width / 2, 80);
-        
-        ctx.font = 'bold 22px Courier New';
+        drawRoundedPanel(92, 60, canvas.width - 184, canvas.height - 120, 'rgba(12, 18, 36, 0.90)', '#7ef9ff', 22);
+        drawSectionTitle('MENÚ PRINCIPAL', canvas.width / 2, 106);
+
         for (let i = 0; i < mainOptions.length; i++) {
-            ctx.fillStyle = i === mainMenuIndex ? '#ff00ff' : '#ffffff';
-            ctx.fillText((i === mainMenuIndex ? '> ' : '') + mainOptions[i] + (i === mainMenuIndex ? ' <' : ''), canvas.width / 2, 150 + (i * 45));
+            drawMenuOption(mainOptions[i], canvas.width / 2, 180 + (i * 52), i === mainMenuIndex);
         }
+        drawFooterHint('FLECHAS para moverte • ENTER para seleccionar • ESC para volver');
     } else if (gameState === 'MENU_INSTRUCTIONS') {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.95)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 35px Courier New'; ctx.textAlign = 'center'; ctx.fillText('INSTRUCCIONES', canvas.width / 2, 70);
-        
-        ctx.fillStyle = '#ffffff'; ctx.font = '18px Courier New'; ctx.textAlign = 'left';
-        ctx.fillText('• Usa las FLECHAS DIRECCIONALES para moverte.', 40, 130);
-        ctx.fillText('• Come todos los puntos blancos para ganar.', 40, 170);
-        ctx.fillText('• Evita a los enemigos; si te tocan, pierdes vida.', 40, 210);
-        
-        ctx.fillStyle = '#ffff00';
-        ctx.fillText('• POWER-UPS (Puntos grandes amarillos):', 40, 260);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText('  Te permiten comerte a los enemigos temporalmente.', 40, 290);
-        ctx.fillText('  ¡Encadena combos para multiplicar tus puntos!', 40, 320);
+        drawRoundedPanel(55, 45, canvas.width - 110, canvas.height - 90, 'rgba(12, 18, 36, 0.95)', '#7ef9ff', 22);
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#7ef9ff';
+        ctx.font = 'bold 32px Courier New';
+        ctx.fillText('INSTRUCCIONES', canvas.width / 2, 94);
+        ctx.fillStyle = '#ffd6f4';
+        ctx.font = '14px Courier New';
+        ctx.fillText('kawaii cyber edition', canvas.width / 2, 118);
 
-        ctx.fillStyle = '#00ffff';
-        ctx.fillText('• PORTALES (Casillas celestes):', 40, 370);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText('  Atraviésalos para teletransportarte por el mapa.', 40, 400);
+        ctx.textAlign = 'left';
+        ctx.font = '15px Courier New';
+        const items = [
+            ['#ffffff', '• Usa las FLECHAS para moverte por el laberinto.'],
+            ['#ffffff', '• Recoge todos los fragmentos para completar el nivel.'],
+            ['#ffffff', '• Evita a los enemigos; si te tocan, pierdes una vida.'],
+            ['#fff28c', '• Las pastillas grandes activan FRIGHTENED y te permiten comerte a los enemigos temporalmente.'],
+            ['#9fe9ff', '• Usa los portales para atravesar rápidamente distintas zonas del mapa.'],
+            ['#dceeff', '• Controles extra: P pausa, M activa/silencia audio y F2 muestra el modo Debug.']
+        ];
+        let y = 160;
+        for (const [color, line] of items) {
+            ctx.fillStyle = color;
+            y = wrapCanvasText(line, 90, y, canvas.width - 180, 22) + 34;
+        }
 
-        ctx.fillStyle = '#ff00ff'; ctx.font = 'bold 16px Courier New'; ctx.textAlign = 'center';
-        ctx.fillText('Presiona ESC o ENTER para volver', canvas.width / 2, canvas.height - 40);
+        ctx.fillStyle = '#ff9bd0';
+        ctx.font = 'bold 15px Courier New';
+        wrapCanvasText('META: sobrevivir, sumar puntos y avanzar por los diferentes mapas.', 90, y + 2, canvas.width - 180, 22);
+        drawFooterHint('ESC o ENTER para volver', canvas.height - 22);
     } else if (gameState === 'MENU_CREDITS') {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.95)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 35px Courier New'; ctx.textAlign = 'center'; ctx.fillText('CRÉDITOS', canvas.width / 2, 100);
-        
-        ctx.fillStyle = '#ffffff'; ctx.font = '22px Courier New';
-        ctx.fillText('DESARROLLADO POR:', canvas.width / 2, 200);
-        
-        ctx.fillStyle = '#ff00ff'; ctx.font = 'bold 26px Courier New';
-        ctx.fillText('Iris Mairet Lucho Hernandez', canvas.width / 2, 260);
-        ctx.fillText('Pamela Ameli Aguirre Sanchez', canvas.width / 2, 310);
-        
-        ctx.fillStyle = '#8888aa'; ctx.font = '16px Courier New';
-        ctx.fillText('Proyecto 4: Cyber Maze - Pursuit Protocol', canvas.width / 2, 400);
-
-        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 16px Courier New';
-        ctx.fillText('Presiona ESC o ENTER para volver', canvas.width / 2, canvas.height - 40);
-    } else if (gameState === 'MENU_LEVELS') {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.9)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 30px Courier New'; ctx.textAlign = 'center'; ctx.fillText('NIVELES GUARDADOS', canvas.width / 2, 70);
-        
+        drawRoundedPanel(62, 70, canvas.width - 124, canvas.height - 140, 'rgba(12, 18, 36, 0.93)', '#7ef9ff', 22);
+        drawSectionTitle('CRÉDITOS', canvas.width / 2, 118);
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '20px Courier New';
+        ctx.fillText('Desarrollado por:', canvas.width / 2, 210);
+        ctx.fillStyle = '#ff9bd0';
+        ctx.font = 'bold 24px Courier New';
+        ctx.fillText('Iris Mairet Lucho Hernandez', canvas.width / 2, 272);
+        ctx.fillText('Pamela Ameli Aguirre Sanchez', canvas.width / 2, 318);
+        ctx.fillStyle = '#dceeff';
         ctx.font = '18px Courier New';
+        ctx.fillText('Proyecto 4 • Cyber Maze: Pursuit Protocol', canvas.width / 2, 412);
+        ctx.fillText('Sprites kawaii + editor + IA + Node.js', canvas.width / 2, 446);
+        drawFooterHint('ESC o ENTER para volver');
+    } else if (gameState === 'MENU_LEVELS') {
+        drawRoundedPanel(68, 48, canvas.width - 136, canvas.height - 96, 'rgba(12, 18, 36, 0.92)', '#7ef9ff', 22);
+        drawSectionTitle('NIVELES GUARDADOS', canvas.width / 2, 88);
+        ctx.font = '18px Courier New';
+        ctx.textAlign = 'center';
         if (savedLevels.length === 0) {
             ctx.fillStyle = '#ffffff';
-            ctx.fillText('No hay niveles guardados aún.', canvas.width / 2, canvas.height / 2);
+            ctx.fillText('No hay niveles guardados todavía.', canvas.width / 2, canvas.height / 2);
         } else {
             let start = Math.max(0, levelMenuIndex - 5);
             let end = Math.min(savedLevels.length, start + 10);
             for (let i = start; i < end; i++) {
-                ctx.fillStyle = i === levelMenuIndex ? '#ffff00' : '#ffffff';
-                let levelName = savedLevels[i].name || `Nivel ${i + 1}`;
-                ctx.fillText((i === levelMenuIndex ? '> ' : '') + levelName + (i === levelMenuIndex ? ' <' : ''), canvas.width / 2, 120 + ((i - start) * 25));
+                drawMenuOption(savedLevels[i].name || `Nivel ${i + 1}`, canvas.width / 2, 150 + ((i - start) * 38), i === levelMenuIndex);
             }
         }
-        ctx.fillStyle = '#ff00ff'; ctx.font = '14px Courier New';
-        ctx.fillText('FLECHAS: Mover | ENTER: Jugar | ESC: Volver', canvas.width / 2, canvas.height - 40);
+        drawFooterHint('FLECHAS mover • ENTER jugar • ESC volver');
     } else if (gameState === 'MENU_SCORES') {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.9)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 30px Courier New'; ctx.textAlign = 'center'; ctx.fillText('MEJORES PUNTUACIONES', canvas.width / 2, 70);
-        
+        drawRoundedPanel(76, 48, canvas.width - 152, canvas.height - 96, 'rgba(12, 18, 36, 0.92)', '#7ef9ff', 22);
+        drawSectionTitle('RANKING TOP 10', canvas.width / 2, 88);
+        ctx.textAlign = 'center';
         ctx.font = '18px Courier New';
         if (highScores.length === 0) {
             ctx.fillStyle = '#ffffff';
-            ctx.fillText('No hay registros aún o sin conexión', canvas.width / 2, canvas.height / 2);
+            ctx.fillText('No hay registros todavía o no hay conexión.', canvas.width / 2, canvas.height / 2);
         } else {
             highScores.forEach((item, index) => {
-                ctx.fillStyle = index === 0 ? '#ffff00' : '#ffffff';
-                ctx.fillText(`${index + 1}. ${item.name.padEnd(10, ' ')} - ${item.score}`, canvas.width / 2, 120 + (index * 25));
+                const y = 145 + (index * 36);
+                if (index === 0) {
+                    drawRoundedPanel(140, y - 18, 360, 28, 'rgba(255, 242, 140, 0.18)', '#fff28c', 12, 'rgba(255, 242, 140, 0.24)');
+                    ctx.fillStyle = '#fff4b5';
+                } else {
+                    ctx.fillStyle = '#e5f4ff';
+                }
+                ctx.fillText(`${index + 1}. ${item.name}  •  ${item.score}`, canvas.width / 2, y + 2);
             });
         }
-        ctx.fillStyle = '#ff00ff'; ctx.font = '14px Courier New';
-        ctx.fillText('Presiona ESC o ENTER para volver', canvas.width / 2, canvas.height - 40);
+        drawFooterHint('ESC o ENTER para volver');
     } else if (gameState === 'ENTER_NAME') {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#ff0044'; ctx.font = 'bold 40px Courier New'; ctx.textAlign = 'center'; ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 60);
-        ctx.fillStyle = '#ffffff'; ctx.font = '18px Courier New'; ctx.fillText('Ingresa tus iniciales (Máx 10):', canvas.width / 2, canvas.height / 2 - 10);
-        
-        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 30px Courier New';
-        ctx.fillText(playerName + '_', canvas.width / 2, canvas.height / 2 + 40);
-        
-        ctx.fillStyle = '#8888aa'; ctx.font = '14px Courier New';
-        ctx.fillText('Presiona ENTER para guardar', canvas.width / 2, canvas.height / 2 + 90);
+        drawRoundedPanel(110, 170, canvas.width - 220, 240, 'rgba(28, 12, 28, 0.93)', '#ff9bd0', 22, 'rgba(255, 155, 208, 0.30)');
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ff9bd0';
+        ctx.font = 'bold 38px Courier New';
+        ctx.fillText('GAME OVER', canvas.width / 2, 235);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '18px Courier New';
+        ctx.fillText('Ingresa tus iniciales (máx. 10)', canvas.width / 2, 282);
+        ctx.fillStyle = '#7ef9ff';
+        ctx.font = 'bold 30px Courier New';
+        ctx.fillText(playerName + '_', canvas.width / 2, 332);
+        ctx.fillStyle = '#ffe3f5';
+        ctx.font = '14px Courier New';
+        ctx.fillText('Presiona ENTER para guardar tu puntuación', canvas.width / 2, 374);
     } else if (gameState === 'PAUSED') {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 40px Courier New'; ctx.textAlign = 'center'; ctx.fillText('PAUSA', canvas.width / 2, canvas.height / 2 - 80);
-        ctx.font = 'bold 24px Courier New';
+        drawRoundedPanel(canvas.width / 2 - 145, canvas.height / 2 - 125, 290, 250, 'rgba(12, 18, 36, 0.94)', '#7ef9ff', 20);
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#7ef9ff';
+        ctx.font = 'bold 30px Courier New';
+        ctx.fillText('PAUSA', canvas.width / 2, canvas.height / 2 - 74);
+        ctx.fillStyle = '#ffd6f4';
+        ctx.font = '13px Courier New';
+        ctx.fillText('kawaii cyber edition', canvas.width / 2, canvas.height / 2 - 50);
         for (let i = 0; i < pauseOptions.length; i++) {
-            ctx.fillStyle = i === pauseMenuIndex ? '#ff00ff' : '#ffffff';
-            ctx.fillText((i === pauseMenuIndex ? '> ' : '') + pauseOptions[i] + (i === pauseMenuIndex ? ' <' : ''), canvas.width / 2, canvas.height / 2 + (i * 50));
+            const y = canvas.height / 2 + 5 + i * 52;
+            if (i === pauseMenuIndex) {
+                drawRoundedPanel(canvas.width / 2 - 110, y - 24, 220, 38, 'rgba(255,122,184,0.18)', '#ff8fd0', 12, 'rgba(255,143,208,0.28)');
+                ctx.fillStyle = '#fff4ff';
+                ctx.font = 'bold 20px Courier New';
+            } else {
+                ctx.fillStyle = '#dceeff';
+                ctx.font = '18px Courier New';
+            }
+            ctx.fillText((i === pauseMenuIndex ? '› ' : '') + pauseOptions[i] + (i === pauseMenuIndex ? ' ‹' : ''), canvas.width / 2, y);
         }
     } else if (gameState === 'GAMEOVER') {
-        ctx.fillStyle = 'rgba(255, 0, 0, 0.5)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#ff0044'; ctx.font = 'bold 50px Courier New'; ctx.textAlign = 'center'; ctx.fillText('REGISTRADO', canvas.width / 2, canvas.height / 2 - 10);
-        ctx.fillStyle = '#ffffff'; ctx.font = '20px Courier New'; ctx.fillText('PUNTUACIÓN: ' + score, canvas.width / 2, canvas.height / 2 + 30);
-        ctx.fillStyle = '#00ffcc'; ctx.font = '18px Courier New'; ctx.fillText('Presiona ENTER para ir al menú', canvas.width / 2, canvas.height / 2 + 70);
+        drawRoundedPanel(112, 190, canvas.width - 224, 210, 'rgba(44, 16, 28, 0.94)', '#ff9bd0', 22, 'rgba(255, 155, 208, 0.32)');
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ff9bd0';
+        ctx.font = 'bold 40px Courier New';
+        ctx.fillText('PUNTUACIÓN GUARDADA', canvas.width / 2, 250);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '20px Courier New';
+        ctx.fillText(`SCORE FINAL: ${score}`, canvas.width / 2, 302);
+        ctx.fillStyle = '#dceeff';
+        ctx.font = '16px Courier New';
+        ctx.fillText('Presiona ENTER para volver al menú', canvas.width / 2, 350);
     } else if (gameState === 'VICTORY') {
-        ctx.fillStyle = 'rgba(0, 255, 204, 0.3)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 50px Courier New'; ctx.textAlign = 'center'; ctx.fillText('NIVEL ' + currentLevel + ' COMPLETADO', canvas.width / 2, canvas.height / 2 - 10);
-        ctx.fillStyle = '#ffffff'; ctx.font = '20px Courier New'; ctx.fillText('PUNTUACIÓN: ' + score, canvas.width / 2, canvas.height / 2 + 30);
-        ctx.fillStyle = '#ff00ff'; ctx.font = '18px Courier New'; ctx.fillText('ENTER: siguiente nivel (más difícil)', canvas.width / 2, canvas.height / 2 + 70);
+        drawRoundedPanel(94, 180, canvas.width - 188, 220, 'rgba(12, 26, 30, 0.92)', '#7ef9ff', 22, 'rgba(126, 249, 255, 0.25)');
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#7ef9ff';
+        ctx.font = 'bold 38px Courier New';
+        ctx.fillText(`NIVEL ${currentLevel} COMPLETADO`, canvas.width / 2, 245);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '20px Courier New';
+        ctx.fillText(`PUNTUACIÓN: ${score}`, canvas.width / 2, 297);
+        ctx.fillStyle = '#fff28c';
+        ctx.font = '17px Courier New';
+        ctx.fillText('ENTER para pasar al siguiente nivel', canvas.width / 2, 345);
     }
 }
 
@@ -1633,10 +1860,11 @@ function gameLoop(timestamp) {
     }
 
     ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    if (gameState !== 'EDITOR' && gameState !== 'TITLE' && gameState !== 'MENU_INSTRUCTIONS' && gameState !== 'MENU_CREDITS') update(); 
-    
-    if (gameState !== 'TITLE' && gameState !== 'MENU_INSTRUCTIONS' && gameState !== 'MENU_CREDITS') {
-        drawMap(); 
+    const gameplayStates = ['READY','PLAYING','PAUSED','DYING','VICTORY','EDITOR'];
+    if (!['EDITOR','TITLE','START','MENU_INSTRUCTIONS','MENU_CREDITS','MENU_LEVELS','MENU_SCORES','ENTER_NAME','GAMEOVER'].includes(gameState)) update();
+
+    if (gameplayStates.includes(gameState)) {
+        drawMap();
         drawDots();
     }
     
@@ -1658,8 +1886,9 @@ function gameLoop(timestamp) {
         }
     }
     
+    updateExternalGameBars();
     drawDebug();
-    if (gameState !== 'START' && gameState !== 'MENU_SCORES' && gameState !== 'MENU_LEVELS' && gameState !== 'TITLE' && gameState !== 'MENU_INSTRUCTIONS' && gameState !== 'MENU_CREDITS') drawUI(); 
+    if (['READY','PLAYING','PAUSED','DYING','VICTORY','EDITOR'].includes(gameState)) drawUI();
     drawMenus(); 
     
     requestAnimationFrame(gameLoop);
