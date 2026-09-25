@@ -73,16 +73,30 @@ app.get('/api/levels', (req, res) => {
 });
 
 app.post('/api/levels', (req, res) => {
-    const { name, matrix } = req.body;
-    
-    if (!name || !matrix) {
+    const { name, matrix, playerStart, enemySpawns } = req.body;
+
+    if (!name || !Array.isArray(matrix)) {
         return res.status(400).json({ error: 'Faltan datos del nivel (nombre o matriz)' });
     }
 
+    if (matrix.length !== 20 || matrix.some(row => !Array.isArray(row) || row.length !== 20)) {
+        return res.status(400).json({ error: 'La matriz del nivel debe ser de 20x20' });
+    }
+
+    if (!playerStart || !Array.isArray(enemySpawns) || enemySpawns.length !== 4) {
+        return res.status(400).json({ error: 'El nivel debe incluir un spawn de jugador y cuatro spawns de enemigos' });
+    }
+
     let levels = readJsonFile(levelsFile, []);
-    levels.push({ name, matrix, createdAt: new Date().toISOString() });
+    levels.push({
+        name,
+        matrix,
+        playerStart,
+        enemySpawns,
+        createdAt: new Date().toISOString()
+    });
     writeJsonFile(levelsFile, levels);
-    
+
     res.status(201).json({ message: 'Nivel guardado exitosamente' });
 });
 

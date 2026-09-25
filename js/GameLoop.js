@@ -121,6 +121,28 @@ let scoreSubmitted = false;
 let savedLevels = [];
 let levelMenuIndex = 0;
 
+// Configuración del editor y de niveles personalizados.
+// 0=suelo, 1=muro, 2=objeto/power-up, 3=portal, 4=spawn jugador, 5=spawn enemigo.
+const EDITOR_TOOLS = [
+    { key: '1', value: 0, name: 'SUELO' },
+    { key: '2', value: 1, name: 'MURO' },
+    { key: '3', value: 2, name: 'OBJETO' },
+    { key: '4', value: 3, name: 'PORTAL' },
+    { key: '5', value: 4, name: 'JUGADOR' },
+    { key: '6', value: 5, name: 'ENEMIGO' }
+];
+let editorTool = 1;
+let editorMessage = '';
+let isCustomLevel = false;
+let useGhostHouse = true;
+let levelPlayerStart = { c: 9, r: 3 };
+let levelEnemySpawns = [
+    { c: 9, r: 6 },
+    { c: 9, r: 8 },
+    { c: 10, r: 8 },
+    { c: 9, r: 9 }
+];
+
 const DIRS = { 'UP': { dx: 0, dy: -1 }, 'DOWN': { dx: 0, dy: 1 }, 'LEFT': { dx: -1, dy: 0 }, 'RIGHT': { dx: 1, dy: 0 }, 'NONE': { dx: 0, dy: 0 } };
 const OPPOSITE_DIR = { 'UP': 'DOWN', 'DOWN': 'UP', 'LEFT': 'RIGHT', 'RIGHT': 'LEFT', 'NONE': 'NONE' };
 
@@ -163,7 +185,7 @@ function initDots() {
     for (let row = 0; row < ROWS; row++) {
         for (let col = 0; col < COLS; col++) {
             if ((mapMatrix[row][col] === 0 || mapMatrix[row][col] === 2) && col > 0 && col < COLS - 1) {
-                if (row >= 7 && row <= 10 && col >= 6 && col <= 13) continue;
+                if (useGhostHouse && row >= 7 && row <= 10 && col >= 6 && col <= 13) continue;
                 let isPowerUp = mapMatrix[row][col] === 2;
                 dots.push({ x: col * TILE_SIZE + TILE_SIZE / 2, y: row * TILE_SIZE + TILE_SIZE / 2, radius: isPowerUp ? 8 : 3, isPowerUp: isPowerUp, collected: false });
                 dotsRemaining++;
@@ -231,8 +253,137 @@ function applyLevelMapComplexity() {
     }
 }
 
+
+function getDefaultPlayerStart() {
+    return { c: 9, r: 3 };
+}
+
+function getDefaultEnemySpawns() {
+    return [
+        { c: 9, r: 6 },
+        { c: 9, r: 8 },
+        { c: 10, r: 8 },
+        { c: 9, r: 9 }
+    ];
+}
+
+function createEditorMap() {
+    const editorMap = JSON.parse(JSON.stringify(BASE_MAP));
+    const p = getDefaultPlayerStart();
+    const enemies = getDefaultEnemySpawns();
+
+    editorMap[p.r][p.c] = 4;
+    enemies.forEach(spawn => {
+        editorMap[spawn.r][spawn.c] = 5;
+    });
+    return editorMap;
+}
+
+function scanLevelMarkers(matrix) {
+    let playerStart = null;
+    const enemySpawns = [];
+    let objectCount = 0;
+    let portalCount = 0;
+
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            const tile = matrix[r][c];
+            if (tile === 4) playerStart = { c, r };
+            else if (tile === 5) enemySpawns.push({ c, r });
+            else if (tile === 2) objectCount++;
+            else if (tile === 3) portalCount++;
+        }
+    }
+    return { playerStart, enemySpawns, objectCount, portalCount };
+}
+
+function makePlayableMatrix(matrix) {
+    const copy = JSON.parse(JSON.stringify(matrix));
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (copy[r][c] === 4 || copy[r][c] === 5) copy[r][c] = 0;
+        }
+    }
+    return copy;
+}
+
+function validateEditorLevel(matrix) {
+    const info = scanLevelMarkers(matrix);
+    if (!info.playerStart) return { ok: false, message: 'Falta colocar el punto inicial del JUGADOR (tecla 5).' };
+    if (info.enemySpawns.length !== 4) return { ok: false, message: `Debes colocar exactamente 4 ENEMIGOS. Actualmente hay ${info.enemySpawns.length}.` };
+    if (info.objectCount < 1) return { ok: false, message: 'Debes colocar al menos 1 OBJETO / power-up (tecla 3).' };
+    if (info.portalCount < 2) return { ok: false, message: 'Debes colocar al menos 2 PORTALES (tecla 4).' };
+
+    // Comprueba que los puntos importantes se puedan alcanzar sin atravesar muros.
+    const playable = makePlayableMatrix(matrix);
+    const start = info.playerStart;
+    const queue = [start];
+    const visited = new Set([`${start.c},${start.r}`]);
+
+    while (queue.length) {
+        const node = queue.shift();
+        for (const dir of ['UP', 'DOWN', 'LEFT', 'RIGHT']) {
+            const nc = node.c + DIRS[dir].dx;
+            const nr = node.r + DIRS[dir].dy;
+            if (nc < 0 || nc >= COLS || nr < 0 || nr >= ROWS) continue;
+            if (playable[nr][nc] === 1) continue;
+            const key = `${nc},${nr}`;
+            if (!visited.has(key)) {
+                visited.add(key);
+                queue.push({ c: nc, r: nr });
+            }
+        }
+    }
+
+    for (const spawn of info.enemySpawns) {
+        if (!visited.has(`${spawn.c},${spawn.r}`)) {
+            return { ok: false, message: 'Hay un spawn de enemigo aislado por muros.' };
+        }
+    }
+
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (matrix[r][c] === 2 && !visited.has(`${c},${r}`)) {
+                return { ok: false, message: 'Hay un objeto que el jugador no puede alcanzar.' };
+            }
+        }
+    }
+
+    return { ok: true, message: 'Nivel válido.', info };
+}
+
+function startSavedLevel(levelData) {
+    const markers = scanLevelMarkers(levelData.matrix);
+    const savedPlayer = levelData.playerStart || markers.playerStart || getDefaultPlayerStart();
+    const savedEnemies = (Array.isArray(levelData.enemySpawns) && levelData.enemySpawns.length > 0)
+        ? levelData.enemySpawns
+        : (markers.enemySpawns.length > 0 ? markers.enemySpawns : getDefaultEnemySpawns());
+
+    levelPlayerStart = { c: savedPlayer.c, r: savedPlayer.r };
+    levelEnemySpawns = savedEnemies.slice(0, 4).map(p => ({ c: p.c, r: p.r }));
+    while (levelEnemySpawns.length < 4) {
+        const fallback = getDefaultEnemySpawns()[levelEnemySpawns.length];
+        levelEnemySpawns.push({ ...fallback });
+    }
+
+    isCustomLevel = true;
+    useGhostHouse = false;
+    currentLevel = 1;
+    score = 0;
+    lives = 3;
+    scoreSubmitted = false;
+    playerName = '';
+    mapMatrix = makePlayableMatrix(levelData.matrix);
+    levelTemplateMap = JSON.parse(JSON.stringify(mapMatrix));
+    applyDifficultySettings();
+    initDots();
+    resetPositions();
+    gameState = 'READY';
+    readyTimer = 120;
+}
+
 function resetPositions() {
-    player.x = 9 * TILE_SIZE; player.y = 3 * TILE_SIZE;
+    player.x = levelPlayerStart.c * TILE_SIZE; player.y = levelPlayerStart.r * TILE_SIZE;
     player.currentDir = 'NONE'; player.nextDir = 'NONE'; player.size = TILE_SIZE - 4;
     dotsEatenThisLife = 0;
     portalCooldown = 0;
@@ -240,10 +391,20 @@ function resetPositions() {
     floatingTexts = [];
     currentPaths = { alpha: [], beta: [], gamma: [], delta: [] };
 
-    enemyAlpha.x = 9 * TILE_SIZE; enemyAlpha.y = 6 * TILE_SIZE; enemyAlpha.currentDir = 'UP'; enemyAlpha.active = true; enemyAlpha.isDead = false; enemyAlpha.state = 'SPAWN'; enemyAlpha.spawnTimer = 45; resetEnemyNavigation(enemyAlpha);
-    enemyBeta.active = false; enemyBeta.x = 9 * TILE_SIZE; enemyBeta.y = 8 * TILE_SIZE; enemyBeta.currentDir = 'UP'; enemyBeta.isDead = false; enemyBeta.state = 'SPAWN'; enemyBeta.spawnTimer = 45; resetEnemyNavigation(enemyBeta);
-    enemyGamma.active = false; enemyGamma.x = 10 * TILE_SIZE; enemyGamma.y = 8 * TILE_SIZE; enemyGamma.currentDir = 'UP'; enemyGamma.isDead = false; enemyGamma.state = 'SPAWN'; enemyGamma.spawnTimer = 45; resetEnemyNavigation(enemyGamma);
-    enemyDelta.active = false; enemyDelta.x = 9 * TILE_SIZE; enemyDelta.y = 9 * TILE_SIZE; enemyDelta.currentDir = 'UP'; enemyDelta.isDead = false; enemyDelta.state = 'SPAWN'; enemyDelta.spawnTimer = 45; resetEnemyNavigation(enemyDelta);
+    enemiesList.forEach((enemy, index) => {
+        const spawn = levelEnemySpawns[index] || getDefaultEnemySpawns()[index];
+        enemy.homeSpawn = { c: spawn.c, r: spawn.r };
+        enemy.x = spawn.c * TILE_SIZE;
+        enemy.y = spawn.r * TILE_SIZE;
+        enemy.currentDir = 'UP';
+        enemy.isDead = false;
+        enemy.state = 'SPAWN';
+        enemy.spawnTimer = isCustomLevel ? 30 + index * 15 : 45;
+        // En mapas personalizados los cuatro spawns son explícitos, así que todos existen desde el inicio.
+        // En campaña conservamos el sistema de liberación por puntos.
+        enemy.active = isCustomLevel ? true : (enemy === enemyAlpha);
+        resetEnemyNavigation(enemy);
+    });
 
     enemyMode = 'SCATTER';
     modeBeforeFrightened = 'SCATTER';
@@ -253,6 +414,10 @@ function resetPositions() {
 
 function fullResetGame() {
     score = 0; lives = 3; scoreSubmitted = false; playerName = ''; currentLevel = 1;
+    isCustomLevel = false;
+    useGhostHouse = true;
+    levelPlayerStart = getDefaultPlayerStart();
+    levelEnemySpawns = getDefaultEnemySpawns();
     levelTemplateMap = getMapForLevel(currentLevel);
     mapMatrix = JSON.parse(JSON.stringify(levelTemplateMap));
     applyDifficultySettings();
@@ -261,6 +426,10 @@ function fullResetGame() {
 
 function startNextLevel() {
     currentLevel++;
+    isCustomLevel = false;
+    useGhostHouse = true;
+    levelPlayerStart = getDefaultPlayerStart();
+    levelEnemySpawns = getDefaultEnemySpawns();
     // Cada nivel carga un diseño diferente. Después del nivel 4 los mapas rotan,
     // mientras la dificultad continúa aumentando normalmente.
     levelTemplateMap = getMapForLevel(currentLevel);
@@ -323,7 +492,27 @@ canvas.addEventListener('mousedown', (e) => {
         const row = Math.floor(mouseY / TILE_SIZE);
 
         if (col >= 0 && col < COLS && row >= 0 && row < ROWS) {
-            mapMatrix[row][col] = (mapMatrix[row][col] + 1) % 4;
+            if (editorTool === 4) {
+                // Solo puede existir un punto inicial del jugador.
+                for (let r = 0; r < ROWS; r++) {
+                    for (let c = 0; c < COLS; c++) {
+                        if (mapMatrix[r][c] === 4) mapMatrix[r][c] = 0;
+                    }
+                }
+                mapMatrix[row][col] = 4;
+                editorMessage = `Jugador colocado en [${col}, ${row}]`;
+            } else if (editorTool === 5) {
+                const currentEnemies = scanLevelMarkers(mapMatrix).enemySpawns.length;
+                if (mapMatrix[row][col] !== 5 && currentEnemies >= 4) {
+                    editorMessage = 'Ya hay 4 enemigos. Borra uno con SUELO antes de colocar otro.';
+                } else {
+                    mapMatrix[row][col] = 5;
+                    editorMessage = `Spawn enemigo colocado en [${col}, ${row}]`;
+                }
+            } else {
+                mapMatrix[row][col] = editorTool;
+                editorMessage = `${EDITOR_TOOLS.find(t => t.value === editorTool).name} colocado en [${col}, ${row}]`;
+            }
         }
     }
 });
@@ -340,7 +529,7 @@ document.addEventListener('keydown', (e) => {
             if (mainMenuIndex === 0) { mapMatrix = getMapForLevel(1); fullResetGame(); gameState = 'READY'; readyTimer = 120; }
             else if (mainMenuIndex === 1) { fetchLevels(); }
             else if (mainMenuIndex === 2) { fetchScores(); }
-            else if (mainMenuIndex === 3) { mapMatrix = JSON.parse(JSON.stringify(BASE_MAP)); gameState = 'EDITOR'; }
+            else if (mainMenuIndex === 3) { mapMatrix = createEditorMap(); editorTool = 1; editorMessage = 'Selecciona una herramienta con las teclas 1-6.'; gameState = 'EDITOR'; }
             else if (mainMenuIndex === 4) { gameState = 'MENU_INSTRUCTIONS'; }
             else if (mainMenuIndex === 5) { gameState = 'MENU_CREDITS'; }
         }
@@ -357,19 +546,55 @@ document.addEventListener('keydown', (e) => {
         if (savedLevels.length > 0) {
             if (e.key === 'ArrowUp') levelMenuIndex = levelMenuIndex - 1 < 0 ? savedLevels.length - 1 : levelMenuIndex - 1;
             if (e.key === 'ArrowDown') levelMenuIndex = levelMenuIndex + 1 >= savedLevels.length ? 0 : levelMenuIndex + 1;
-            if (e.key === 'Enter') { mapMatrix = JSON.parse(JSON.stringify(savedLevels[levelMenuIndex].matrix)); fullResetGame(); gameState = 'READY'; readyTimer = 120; }
+            if (e.key === 'Enter') { startSavedLevel(savedLevels[levelMenuIndex]); }
         }
         return;
     }
     
     if (gameState === 'EDITOR') {
-        if (e.key === 'Escape') gameState = 'START'; 
+        if (e.key === 'Escape') { gameState = 'START'; return; }
+
+        const selectedTool = EDITOR_TOOLS.find(tool => tool.key === e.key);
+        if (selectedTool) {
+            editorTool = selectedTool.value;
+            editorMessage = `Herramienta actual: ${selectedTool.name}`;
+            return;
+        }
+
         if (e.key.toLowerCase() === 's') {
+            const validation = validateEditorLevel(mapMatrix);
+            if (!validation.ok) {
+                editorMessage = validation.message;
+                alert('NO SE PUEDE GUARDAR\n\n' + validation.message);
+                return;
+            }
+
             const levelName = prompt("Ingresa un nombre para tu nivel:");
-            if (levelName) {
-                fetch('http://localhost:3000/api/levels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: levelName, matrix: mapMatrix }) })
-                .then(() => alert("¡Nivel guardado!"))
-                .catch(() => alert("Error al guardar nivel."));
+            if (levelName && levelName.trim()) {
+                const payload = {
+                    name: levelName.trim(),
+                    matrix: mapMatrix,
+                    playerStart: validation.info.playerStart,
+                    enemySpawns: validation.info.enemySpawns
+                };
+
+                fetch('http://localhost:3000/api/levels', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                })
+                .then(res => {
+                    if (!res.ok) throw new Error('Error HTTP ' + res.status);
+                    return res.json();
+                })
+                .then(() => {
+                    editorMessage = '¡Nivel guardado correctamente en Node.js!';
+                    alert("¡Nivel guardado!");
+                })
+                .catch(() => {
+                    editorMessage = 'No se pudo guardar. Verifica que el servidor Node.js esté encendido.';
+                    alert("Error al guardar nivel. Verifica el servidor.");
+                });
             }
         }
         return;
@@ -388,7 +613,7 @@ document.addEventListener('keydown', (e) => {
     }
 
     if (gameState === 'GAMEOVER' && e.key === 'Enter') { gameState = 'START'; return; }
-    if (gameState === 'VICTORY' && e.key === 'Enter') { startNextLevel(); return; }
+    if (gameState === 'VICTORY' && e.key === 'Enter') { if (isCustomLevel) fetchLevels(); else startNextLevel(); return; }
 
     if (gameState === 'PLAYING' || gameState === 'READY') {
         if (e.key === 'Escape') { gameState = 'PAUSED'; pauseMenuIndex = 0; return; }
@@ -431,8 +656,8 @@ function isPlayerColliding(newX, newY) {
     const bottomRow = Math.floor((newY + player.size - 1) / TILE_SIZE);
 
     if (topRow < 0 || bottomRow >= ROWS || leftCol < 0 || rightCol >= COLS) return false; 
-    if ((topRow >= 7 && topRow <= 10 && leftCol >= 6 && leftCol <= 13) ||
-        (bottomRow >= 7 && bottomRow <= 10 && rightCol >= 6 && rightCol <= 13)) return true; 
+    if (useGhostHouse && ((topRow >= 7 && topRow <= 10 && leftCol >= 6 && leftCol <= 13) ||
+        (bottomRow >= 7 && bottomRow <= 10 && rightCol >= 6 && rightCol <= 13))) return true; 
 
     if (mapMatrix[topRow][leftCol] === 1 || mapMatrix[topRow][rightCol] === 1 || 
         mapMatrix[bottomRow][leftCol] === 1 || mapMatrix[bottomRow][rightCol] === 1) return true;
@@ -446,7 +671,7 @@ function updatePlayer() {
         if (player.nextDir !== 'NONE') {
             let nextCol = col + DIRS[player.nextDir].dx;
             let nextRow = row + DIRS[player.nextDir].dy;
-            let isEnteringSpawn = (nextRow >= 7 && nextRow <= 10 && nextCol >= 6 && nextCol <= 13);
+            let isEnteringSpawn = useGhostHouse && (nextRow >= 7 && nextRow <= 10 && nextCol >= 6 && nextCol <= 13);
             if (!isEnteringSpawn && getMapTile(nextCol, nextRow) !== 1) player.currentDir = player.nextDir;
         }
         if (player.currentDir !== 'NONE') {
@@ -651,8 +876,9 @@ function releaseEnemy(enemy) {
     enemy.active = true;
     enemy.state = 'SPAWN';
     enemy.spawnTimer = 30;
-    enemy.x = 9 * TILE_SIZE;
-    enemy.y = 8 * TILE_SIZE;
+    const spawn = enemy.homeSpawn || { c: 9, r: 8 };
+    enemy.x = spawn.c * TILE_SIZE;
+    enemy.y = spawn.r * TILE_SIZE;
     enemy.currentDir = 'UP';
     resetEnemyNavigation(enemy);
 }
@@ -713,9 +939,11 @@ function getDynamicFleeTarget(enemy, pCol, pRow) {
 }
 
 function updateEnemies() {
-    if (!enemyBeta.active && dotsEatenThisLife >= enemyBeta.releaseDots) releaseEnemy(enemyBeta);
-    if (!enemyGamma.active && dotsEatenThisLife >= enemyGamma.releaseDots) releaseEnemy(enemyGamma);
-    if (!enemyDelta.active && dotsEatenThisLife >= enemyDelta.releaseDots) releaseEnemy(enemyDelta);
+    if (!isCustomLevel) {
+        if (!enemyBeta.active && dotsEatenThisLife >= enemyBeta.releaseDots) releaseEnemy(enemyBeta);
+        if (!enemyGamma.active && dotsEatenThisLife >= enemyGamma.releaseDots) releaseEnemy(enemyGamma);
+        if (!enemyDelta.active && dotsEatenThisLife >= enemyDelta.releaseDots) releaseEnemy(enemyDelta);
+    }
 
     modeTimer++;
     if (enemyMode === 'FRIGHTENED' && modeTimer > FRIGHTENED_DURATION) {
@@ -842,32 +1070,43 @@ function updateEnemies() {
 
         let eCol = Math.floor((e.x + TILE_SIZE/2) / TILE_SIZE);
         let eRow = Math.floor((e.y + TILE_SIZE/2) / TILE_SIZE);
-        const inBase = eCol >= 8 && eCol <= 11 && eRow >= 7 && eRow <= 9;
+        const home = e.homeSpawn || { c: 9, r: 8 };
+        const inBase = useGhostHouse
+            ? (eCol >= 8 && eCol <= 11 && eRow >= 7 && eRow <= 9)
+            : (getTileDistance(eCol, eRow, home.c, home.r) <= 0.5);
 
         if (e.state === 'RETURN' && inBase) {
             e.state = 'SPAWN';
             e.isDead = false;
             e.spawnTimer = 45;
-            e.x = 9 * TILE_SIZE;
-            e.y = 8 * TILE_SIZE;
+            e.x = home.c * TILE_SIZE;
+            e.y = home.r * TILE_SIZE;
             e.currentDir = 'UP';
             resetEnemyNavigation(e);
         }
 
         if (e.state === 'SPAWN') {
             if (e.spawnTimer > 0) e.spawnTimer--;
-            const exitTarget = { c: 9, r: 6 };
-            getEnemyMove(e, exitTarget.c, exitTarget.r);
-            eCol = Math.floor(e.x / TILE_SIZE);
-            eRow = Math.floor(e.y / TILE_SIZE);
-            if (e.spawnTimer <= 0 && !(eCol >= 8 && eCol <= 11 && eRow >= 7 && eRow <= 9)) {
+
+            if (useGhostHouse) {
+                const exitTarget = { c: 9, r: 6 };
+                getEnemyMove(e, exitTarget.c, exitTarget.r);
+                eCol = Math.floor(e.x / TILE_SIZE);
+                eRow = Math.floor(e.y / TILE_SIZE);
+                if (e.spawnTimer <= 0 && !(eCol >= 8 && eCol <= 11 && eRow >= 7 && eRow <= 9)) {
+                    e.state = enemyMode === 'FRIGHTENED' ? modeBeforeFrightened : enemyMode;
+                }
+            } else if (e.spawnTimer <= 0) {
+                // En mapas creados por el editor no hay una "casa" obligatoria:
+                // reaparece exactamente donde el diseñador colocó su spawn.
                 e.state = enemyMode === 'FRIGHTENED' ? modeBeforeFrightened : enemyMode;
+                resetEnemyNavigation(e);
             }
             return;
         }
 
         let target;
-        if (e.state === 'RETURN') target = { c: 9, r: 8 };
+        if (e.state === 'RETURN') target = home;
         else if (e === enemyAlpha) target = currentTargets.alpha;
         else if (e === enemyBeta) target = currentTargets.beta;
         else if (e === enemyGamma) target = currentTargets.gamma;
@@ -966,13 +1205,23 @@ function drawMap() {
                 ctx.fillStyle = '#00ffff'; ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 15;
                 ctx.fillRect(col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
                 ctx.shadowBlur = 0;
+            } else if (mapMatrix[row][col] === 4 && gameState === 'EDITOR') {
+                ctx.fillStyle = '#00ffcc';
+                ctx.beginPath(); ctx.arc(col * TILE_SIZE + TILE_SIZE/2, row * TILE_SIZE + TILE_SIZE/2, 11, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#001111'; ctx.font = 'bold 14px Courier New'; ctx.textAlign = 'center';
+                ctx.fillText('P', col * TILE_SIZE + TILE_SIZE/2, row * TILE_SIZE + TILE_SIZE/2 + 5);
+            } else if (mapMatrix[row][col] === 5 && gameState === 'EDITOR') {
+                ctx.fillStyle = '#ff66cc';
+                ctx.beginPath(); ctx.arc(col * TILE_SIZE + TILE_SIZE/2, row * TILE_SIZE + TILE_SIZE/2, 11, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#220011'; ctx.font = 'bold 14px Courier New'; ctx.textAlign = 'center';
+                ctx.fillText('E', col * TILE_SIZE + TILE_SIZE/2, row * TILE_SIZE + TILE_SIZE/2 + 5);
             }
             if (gameState === 'EDITOR') {
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)'; ctx.strokeRect(col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
             }
         }
     }
-    if (gameState !== 'EDITOR') {
+    if (gameState !== 'EDITOR' && useGhostHouse) {
         ctx.fillStyle = 'rgba(255, 100, 255, 0.5)';
         ctx.fillRect(9 * TILE_SIZE, 7 * TILE_SIZE, TILE_SIZE * 2, TILE_SIZE / 4);
     }
@@ -1171,9 +1420,17 @@ function drawDebug() {
 
 function drawUI() { 
     if (gameState === 'EDITOR') {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.fillRect(0, 0, canvas.width, 30);
-        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 16px Courier New'; ctx.textAlign = 'left';
-        ctx.fillText('MODO EDITOR | CLIC: Cambiar | S: Guardar JSON | ESC: Salir', 10, 20);
+        const tool = EDITOR_TOOLS.find(t => t.value === editorTool);
+        const info = scanLevelMarkers(mapMatrix);
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.86)'; ctx.fillRect(0, 0, canvas.width, 62);
+        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 13px Courier New'; ctx.textAlign = 'left';
+        ctx.fillText('EDITOR | 1 Suelo  2 Muro  3 Objeto  4 Portal  5 Jugador  6 Enemigo', 8, 17);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(`Herramienta: ${tool.name} | Enemigos: ${info.enemySpawns.length}/4 | S Guardar | ESC Salir`, 8, 36);
+        ctx.fillStyle = editorMessage.toLowerCase().includes('falta') || editorMessage.toLowerCase().includes('debes') || editorMessage.toLowerCase().includes('error')
+            ? '#ff6688' : '#ffff66';
+        ctx.fillText(editorMessage.slice(0, 82), 8, 54);
         return;
     }
 
